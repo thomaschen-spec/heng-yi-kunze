@@ -425,10 +425,16 @@ with st.sidebar:
         st.markdown("**✅ 小老師模式啟動**")
         st.markdown("---")
         if st.button("← 回到後台首頁", use_container_width=True):
+            _cur = st.session_state.admin_reply_sid
+            if _cur:
+                st.session_state.pop(f"_del_confirm_{_cur}", None)
             st.session_state.page = "admin"
             st.session_state.admin_reply_sid = None
             st.rerun()
         if st.button("🚪 登出管理模式", use_container_width=True):
+            _cur = st.session_state.admin_reply_sid
+            if _cur:
+                st.session_state.pop(f"_del_confirm_{_cur}", None)
             st.session_state.admin_mode = False
             st.session_state.page = "home"
             st.rerun()
