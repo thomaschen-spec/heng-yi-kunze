@@ -405,37 +405,28 @@ with st.sidebar:
                 st.warning("尚未設定 line_token")
             else:
                 st.success("line_token ✅")
-                if st.button("🔍 查詢我的 LINE User ID", use_container_width=True):
+
+            if not user_id:
+                st.markdown("""**取得 LINE User ID（步驟）：**
+1. 打開 [webhook.site](https://webhook.site) → 複製畫面上的網址（Your unique URL）
+2. LINE Developers → 你的 Channel → Messaging API → Webhook settings
+3. 貼上 webhook.site 的網址 → 點 **Update** → 開啟 **Use webhook**
+4. 用手機 LINE 傳任一訊息給你的 Bot
+5. 回到 webhook.site → 點剛收到的請求 → 在 JSON 裡找 `"userId": "Uxxxxxxx"`
+6. 複製那串 ID，填進 Streamlit Secrets：`line_user_id = "Uxxxxxxx"`""")
+            else:
+                st.success("line_user_id ✅")
+                if st.button("📤 發送測試訊息", use_container_width=True):
                     try:
-                        r = _req.get(
-                            "https://api.line.me/v2/bot/followers/ids",
-                            headers={"Authorization": f"Bearer {token}"},
+                        _req.post(
+                            "https://api.line.me/v2/bot/message/push",
+                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                            json={"to": user_id, "messages": [{"type": "text", "text": "【測試】LINE 通知設定成功 ✅"}]},
                             timeout=10,
                         )
-                        ids = r.json().get("userIds", [])
-                        if ids:
-                            st.code("\n".join(ids))
-                            st.caption("複製第一個 ID，填入 Streamlit Secrets → line_user_id")
-                        else:
-                            st.error("沒有找到 User ID，確認已傳訊息給 Bot")
+                        st.success("已發送！檢查你的 LINE")
                     except Exception as e:
-                        st.error(f"查詢失敗：{e}")
-
-                if not user_id:
-                    st.warning("尚未設定 line_user_id")
-                else:
-                    st.success("line_user_id ✅")
-                    if st.button("📤 發送測試訊息", use_container_width=True):
-                        try:
-                            _req.post(
-                                "https://api.line.me/v2/bot/message/push",
-                                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                                json={"to": user_id, "messages": [{"type": "text", "text": "【測試】LINE 通知設定成功 ✅"}]},
-                                timeout=10,
-                            )
-                            st.success("已發送！檢查你的 LINE")
-                        except Exception as e:
-                            st.error(f"發送失敗：{e}")
+                        st.error(f"發送失敗：{e}")
     else:
         st.markdown("## ☯ 洞察易生的經歷")
         st.markdown("---")
