@@ -320,7 +320,7 @@ with st.sidebar:
 </small>""", unsafe_allow_html=True)
 
         st.markdown("---")
-        with st.expander("🔐 顧問入口"):
+        with st.expander("🔐 管理入口"):
             pw = st.text_input("管理密碼", type="password", key="admin_pw")
             if st.button("進入管理後台", use_container_width=True):
                 if pw == ADMIN_PASSWORD:
