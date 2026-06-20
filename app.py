@@ -601,7 +601,7 @@ window.parent.location.href = '?sid={found_sid}';
 # ── Customer: Register ────────────────────────────────────────────────────────
 def show_register():
     cat_name = st.session_state.selected_cat
-    if not cat_name:
+    if not cat_name or cat_name not in CATEGORIES:
         st.session_state.page = "home"
         st.rerun()
         return
@@ -743,16 +743,18 @@ def show_admin():
     fc1, fc2 = st.columns([2, 3])
     with fc1:
         status_opts = ["全部", "待回覆", "已解讀"]
+        sf_val = st.session_state.admin_status_filter
         sf = st.radio(
             "狀態", status_opts, horizontal=True,
-            index=status_opts.index(st.session_state.admin_status_filter),
+            index=status_opts.index(sf_val) if sf_val in status_opts else 0,
         )
         st.session_state.admin_status_filter = sf
     with fc2:
         cat_opts = ["全部"] + list(CATEGORIES.keys())
+        cf_val = st.session_state.admin_cat_filter
         cf = st.selectbox(
             "分區", cat_opts,
-            index=cat_opts.index(st.session_state.admin_cat_filter),
+            index=cat_opts.index(cf_val) if cf_val in cat_opts else 0,
         )
         st.session_state.admin_cat_filter = cf
 
@@ -768,8 +770,10 @@ def show_admin():
                                placeholder="輸入姓名或姓氏", label_visibility="collapsed")
         st.session_state.admin_name_search = search
     with sb:
-        sort_mode = st.radio("排列", ["最新時間", "姓氏分組"], horizontal=True,
-                             index=["最新時間", "姓氏分組"].index(st.session_state.admin_sort_mode))
+        sort_opts = ["最新時間", "姓氏分組"]
+        sm_val = st.session_state.admin_sort_mode
+        sort_mode = st.radio("排列", sort_opts, horizontal=True,
+                             index=sort_opts.index(sm_val) if sm_val in sort_opts else 0)
         st.session_state.admin_sort_mode = sort_mode
     with sc:
         if st.button("🗄️ 歸檔", use_container_width=True):
