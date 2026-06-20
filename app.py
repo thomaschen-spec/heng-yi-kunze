@@ -380,6 +380,7 @@ def init_state():
         "admin_name_search": "",
         "admin_sort_mode": "最新時間",
         "_clear_storage": False,
+        "_admin_reply_from": "admin",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -525,12 +526,12 @@ with st.sidebar:
 
 # ── Customer: Home ────────────────────────────────────────────────────────────
 def show_home():
-    if st.session_state.get("_clear_storage"):
+    _show_clear = st.session_state.get("_clear_storage", False)
+    if _show_clear:
         _components.html("""<script>
 localStorage.removeItem('iching_sid');
 </script>""", height=0)
         st.session_state["_clear_storage"] = False
-        st.info("您之前的諮詢已結案。如需繼續，請重新選擇分區問卦。")
     else:
         _components.html("""<script>
 const sid = localStorage.getItem('iching_sid');
@@ -548,6 +549,8 @@ if (sid) {
         unsafe_allow_html=True,
     )
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
+    if _show_clear:
+        st.info("您之前的諮詢已結案。如需繼續，請重新選擇分區問卦。")
 
     st.markdown("""<div class="info-box">
 　《易經》六十四卦，象天地萬物之變化，述人事吉凶之道理。<br><br>
@@ -814,6 +817,7 @@ def show_admin():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("查看回覆 →", key=f"open_{s['session_id']}", use_container_width=True):
                 st.session_state.admin_reply_sid = s["session_id"]
+                st.session_state._admin_reply_from = "admin"
                 st.session_state.page = "admin_reply"
                 st.rerun()
 
@@ -833,8 +837,10 @@ def show_admin_reply():
     category = sess["category"]
     info = CATEGORIES.get(category, {"icon": "☯", "desc": ""})
 
-    if st.button("← 後台"):
-        st.session_state.page = "admin"
+    back_page = st.session_state.get("_admin_reply_from", "admin")
+    back_label = "← 歸檔" if back_page == "admin_archive" else "← 後台"
+    if st.button(back_label):
+        st.session_state.page = back_page
         st.session_state.admin_reply_sid = None
         st.rerun()
 
@@ -890,6 +896,8 @@ def show_admin_reply():
                 add_message(sid, "consultant", reply.strip())
                 st.session_state.reply_ver += 1
                 st.rerun()
+            else:
+                st.error("請輸入解讀內容")
     with r2:
         if st.button("🗑 清除輸入", use_container_width=True):
             st.session_state.reply_ver += 1
@@ -952,6 +960,7 @@ def show_admin_archive():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("查看", key=f"view_arch_{s['session_id']}", use_container_width=True):
                 st.session_state.admin_reply_sid = s["session_id"]
+                st.session_state._admin_reply_from = "admin_archive"
                 st.session_state.page = "admin_reply"
                 st.rerun()
         with cb2:
