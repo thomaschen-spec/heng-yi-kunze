@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as _components
 import uuid
 import requests as _req
+import html as _html
 from datetime import datetime, timezone, timedelta
 
 _TAIWAN = timezone(timedelta(hours=8))
@@ -213,7 +214,7 @@ def _enrich(sessions):
         })
     return result
 
-def create_session(name: str, category: str, phone: str = "") -> str:
+def create_session(name: str, category: str, phone: str = ""):
     sid = str(uuid.uuid4())[:8].upper()
     try:
         _post("sessions", {
@@ -222,9 +223,10 @@ def create_session(name: str, category: str, phone: str = "") -> str:
             "category": category,
             "preference": phone,
         })
+        return sid
     except Exception as e:
         st.error(f"建立諮詢失敗：{e}")
-    return sid
+        return None
 
 def get_session_by_phone(phone: str):
     try:
@@ -329,6 +331,17 @@ def get_stats():
         st.warning(f"⚠️ 資料庫連線異常：{e}")
         return {"total": 0, "today": 0, "pending": 0, "replied": 0}
 
+@st.cache_data(ttl=300)
+def _check_line_token(token: str):
+    try:
+        r = _req.get("https://api.line.me/v2/bot/info",
+                     headers={"Authorization": f"Bearer {token}"}, timeout=8)
+        if r.status_code == 200:
+            return True, r.json().get("displayName", "Bot")
+        return False, f"{r.status_code}：{r.text}"
+    except Exception as e:
+        return None, str(e)
+
 def send_notification(name: str, category: str, question: str, sid: str, is_followup: bool = False):
     token   = st.secrets.get("line_token", "")
     user_id = st.secrets.get("line_user_id", "")
@@ -432,17 +445,13 @@ with st.sidebar:
             if not token:
                 st.warning("尚未設定 line_token")
             else:
-                # 驗證 token 是否有效
-                try:
-                    chk = _req.get("https://api.line.me/v2/bot/info",
-                                   headers={"Authorization": f"Bearer {token}"}, timeout=8)
-                    if chk.status_code == 200:
-                        bot_name = chk.json().get("displayName", "Bot")
-                        st.success(f"line_token ✅  Bot：{bot_name}")
-                    else:
-                        st.error(f"line_token 無效 {chk.status_code}：{chk.text}")
-                except Exception as e:
-                    st.error(f"token 驗證失敗：{e}")
+                ok, info = _check_line_token(token)
+                if ok is True:
+                    st.success(f"line_token ✅  Bot：{info}")
+                elif ok is False:
+                    st.error(f"line_token 無效 {info}")
+                else:
+                    st.error(f"token 驗證失敗：{info}")
 
             if not user_id:
                 st.markdown("""**取得 LINE User ID（步驟）：**
@@ -612,6 +621,8 @@ def show_register():
             st.error("請填寫問題")
         else:
             sid = create_session(name.strip(), cat_name, phone.strip())
+            if not sid:
+                return
             add_message(sid, "customer", question.strip())
             send_notification(name.strip(), cat_name, question.strip(), sid)
             st.success("問卦已送出，正在跳轉⋯⋯")
@@ -776,19 +787,21 @@ def show_admin():
         cat_icon = CATEGORIES.get(s["category"], {}).get("icon", "☯")
         preview = s["last_msg"] or "（尚未提問）"
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
+        name_esc = _html.escape(s["customer_name"])
+        preview_esc = _html.escape(preview)
 
         ci, cb = st.columns([4, 1])
         with ci:
             st.markdown(f"""<div class="sess-card {css_cls}">
 <div>
-  <span class="sess-name">{s['customer_name']}</span>
+  <span class="sess-name">{name_esc}</span>
   <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {s['category']}</span>
   {status_html}
 </div>
 <div class="sess-meta">
   編號：{s['session_id']} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
-<div class="sess-preview">💬 {preview}</div>
+<div class="sess-preview">💬 {preview_esc}</div>
 </div>""", unsafe_allow_html=True)
         with cb:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -818,10 +831,11 @@ def show_admin_reply():
         st.session_state.admin_reply_sid = None
         st.rerun()
 
+    cname_esc = _html.escape(sess["customer_name"])
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
-<div class="chat-hdr-title">{sess['customer_name']} · {category}</div>
+<div class="chat-hdr-title">{cname_esc} · {category}</div>
 <div class="chat-hdr-sub">編號：{sid} · 建立：{fmt_time(sess['created_at'])}</div>
 </span>
 </div>""", unsafe_allow_html=True)
@@ -911,19 +925,21 @@ def show_admin_archive():
         cat_icon = CATEGORIES.get(s["category"], {}).get("icon", "☯")
         preview = s["last_msg"] or "（無訊息）"
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
+        name_esc = _html.escape(s["customer_name"])
+        preview_esc = _html.escape(preview)
 
         ci, cb1, cb2 = st.columns([4, 1, 1])
         with ci:
             st.markdown(f"""<div class="sess-card replied">
 <div>
-  <span class="sess-name">{s['customer_name']}</span>
+  <span class="sess-name">{name_esc}</span>
   <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {s['category']}</span>
   <span class="badge badge-green">🗄️ 已歸檔</span>
 </div>
 <div class="sess-meta">
   編號：{s['session_id']} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
-<div class="sess-preview">💬 {preview}</div>
+<div class="sess-preview">💬 {preview_esc}</div>
 </div>""", unsafe_allow_html=True)
         with cb1:
             st.markdown("<br>", unsafe_allow_html=True)
