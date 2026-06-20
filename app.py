@@ -673,7 +673,9 @@ def show_chat():
 
     sess = get_session(sid)
     if sess is _DB_ERROR:
-        st.error("⚠️ 資料庫暫時無法連線，請稍後重新整理。")
+        st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
+        if st.button("🔄 重新整理", key="_chat_retry"):
+            st.rerun()
         return
     if sess is None:
         st.error("找不到此諮詢記錄。")
@@ -861,6 +863,8 @@ def show_admin_reply():
     sess = get_session(sid)
     if sess is _DB_ERROR:
         st.error("⚠️ 資料庫暫時無法連線，請稍後重試。")
+        if st.button("🔄 重新整理", key="_admin_retry"):
+            st.rerun()
         return
     if sess is None:
         st.error("找不到此問卦記錄。")
