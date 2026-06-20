@@ -463,8 +463,6 @@ with st.sidebar:
             if sess:
                 icon = CATEGORIES.get(sess["category"], {}).get("icon", "☯")
                 st.markdown(f"**目前分區：** {icon} {sess['category']}")
-                st.markdown("**您的諮詢編號：**")
-                st.markdown(f'<div class="sid-box">{sid}</div>', unsafe_allow_html=True)
             if st.button("← 回到首頁", use_container_width=True):
                 st.session_state.page = "home"
                 st.session_state.customer_sid = None
