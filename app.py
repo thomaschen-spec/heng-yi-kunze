@@ -397,6 +397,45 @@ with st.sidebar:
                 else:
                     set_admin_password(new_pw)
                     st.success("密碼已更新")
+
+        with st.expander("💬 LINE 通知設定"):
+            token = st.secrets.get("line_token", "")
+            user_id = st.secrets.get("line_user_id", "")
+            if not token:
+                st.warning("尚未設定 line_token")
+            else:
+                st.success("line_token ✅")
+                if st.button("🔍 查詢我的 LINE User ID", use_container_width=True):
+                    try:
+                        r = _req.get(
+                            "https://api.line.me/v2/bot/followers/ids",
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=10,
+                        )
+                        ids = r.json().get("userIds", [])
+                        if ids:
+                            st.code("\n".join(ids))
+                            st.caption("複製第一個 ID，填入 Streamlit Secrets → line_user_id")
+                        else:
+                            st.error("沒有找到 User ID，確認已傳訊息給 Bot")
+                    except Exception as e:
+                        st.error(f"查詢失敗：{e}")
+
+                if not user_id:
+                    st.warning("尚未設定 line_user_id")
+                else:
+                    st.success("line_user_id ✅")
+                    if st.button("📤 發送測試訊息", use_container_width=True):
+                        try:
+                            _req.post(
+                                "https://api.line.me/v2/bot/message/push",
+                                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                                json={"to": user_id, "messages": [{"type": "text", "text": "【測試】LINE 通知設定成功 ✅"}]},
+                                timeout=10,
+                            )
+                            st.success("已發送！檢查你的 LINE")
+                        except Exception as e:
+                            st.error(f"發送失敗：{e}")
     else:
         st.markdown("## ☯ 洞察易生的經歷")
         st.markdown("---")
