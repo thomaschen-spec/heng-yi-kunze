@@ -221,7 +221,7 @@ def create_session(name: str, category: str, phone: str = ""):
             "session_id": sid,
             "customer_name": name,
             "category": category,
-            "preference": phone,
+            "preference": phone.lower(),
         })
         return sid
     except Exception as e:
@@ -231,7 +231,7 @@ def create_session(name: str, category: str, phone: str = ""):
 def get_session_by_phone(phone: str):
     try:
         data = _get("sessions", {
-            "preference": f"eq.{phone}",
+            "preference": f"eq.{phone.lower()}",
             "is_closed": "eq.false",
             "order": "created_at.desc",
             "limit": "1",
@@ -563,11 +563,15 @@ if (sid) {
             if phone_clean:
                 sess = get_session_by_phone(phone_clean)
                 if sess:
-                    st.session_state.customer_sid = sess["session_id"]
+                    found_sid = sess["session_id"]
+                    st.session_state.customer_sid = found_sid
                     st.session_state.customer_name = sess["customer_name"]
                     st.session_state.page = "chat"
-                    st.query_params["sid"] = sess["session_id"]
-                    st.rerun()
+                    _components.html(f"""<script>
+localStorage.setItem('iching_sid', '{found_sid}');
+window.parent.location.href = '?sid={found_sid}';
+</script>""", height=0)
+                    st.stop()
                 else:
                     st.error("找不到記錄，或諮詢已結案。")
 
