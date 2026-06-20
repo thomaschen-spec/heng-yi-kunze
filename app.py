@@ -1,8 +1,6 @@
 import streamlit as st
 import uuid
 import requests as _req
-import smtplib, ssl
-from email.mime.text import MIMEText
 from datetime import datetime
 
 # ── Page Config ───────────────────────────────────────────────────────────────
@@ -309,20 +307,21 @@ def get_stats():
         return {"total": 0, "today": 0, "pending": 0, "replied": 0}
 
 def send_notification(name: str, category: str, question: str, sid: str):
-    email    = st.secrets.get("notify_email", "")
-    password = st.secrets.get("notify_password", "")
-    if not email or not password:
+    token   = st.secrets.get("line_token", "")
+    user_id = st.secrets.get("line_user_id", "")
+    if not token or not user_id:
         return
     try:
-        body = f"新問卦通知\n\n姓名：{name}\n分區：{category}\n編號：{sid}\n\n問題：\n{question}"
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = f"【洞察易生的經歷】新問卦 · {name} · {category}"
-        msg["From"] = email
-        msg["To"]   = email
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
-            s.login(email, password)
-            s.send_message(msg)
+        text = f"【新問卦】\n姓名：{name}\n分區：{category}\n編號：{sid}\n\n問題：\n{question[:200]}"
+        _req.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"to": user_id, "messages": [{"type": "text", "text": text}]},
+            timeout=10,
+        )
     except Exception:
         pass
 
