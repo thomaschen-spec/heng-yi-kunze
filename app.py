@@ -405,7 +405,17 @@ with st.sidebar:
             if not token:
                 st.warning("尚未設定 line_token")
             else:
-                st.success("line_token ✅")
+                # 驗證 token 是否有效
+                try:
+                    chk = _req.get("https://api.line.me/v2/bot/info",
+                                   headers={"Authorization": f"Bearer {token}"}, timeout=8)
+                    if chk.status_code == 200:
+                        bot_name = chk.json().get("displayName", "Bot")
+                        st.success(f"line_token ✅  Bot：{bot_name}")
+                    else:
+                        st.error(f"line_token 無效 {chk.status_code}：{chk.text}")
+                except Exception as e:
+                    st.error(f"token 驗證失敗：{e}")
 
             if not user_id:
                 st.markdown("""**取得 LINE User ID（步驟）：**
