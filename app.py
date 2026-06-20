@@ -1,5 +1,5 @@
 import streamlit as st
-import streamlit.components.v1 as components
+import streamlit.components.v1 as _components
 import uuid
 import requests as _req
 from datetime import datetime
@@ -307,28 +307,6 @@ def get_stats():
         st.warning(f"⚠️ 資料庫連線異常：{e}")
         return {"total": 0, "today": 0, "pending": 0, "replied": 0}
 
-def generate_iching_reading(category: str, question: str) -> str:
-    api_key = st.secrets.get("anthropic_api_key", "")
-    if not api_key:
-        return ""
-    try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": (
-                f"你是精通易經六十四卦的小老師，語氣溫和、智慧深厚，以繁體中文解卦。\n\n"
-                f"問卦分區：{category}\n問題：{question}\n\n"
-                f"請提供完整易經解讀（約400字）：\n"
-                f"1. 選定最適合的卦象（卦名＋六爻圖示，陽爻用━━，陰爻用━ ━）\n"
-                f"2. 卦象核心意涵\n3. 針對此問題的具體解析\n4. 行動建議與時機提示"
-            )}]
-        )
-        return resp.content[0].text
-    except Exception:
-        return ""
-
 def send_notification(name: str, category: str, question: str, sid: str):
     token   = st.secrets.get("line_token", "")
     user_id = st.secrets.get("line_user_id", "")
@@ -498,7 +476,7 @@ with st.sidebar:
 
 # ── Customer: Home ────────────────────────────────────────────────────────────
 def show_home():
-    components.html("""<script>
+    _components.html("""<script>
 const sid = localStorage.getItem('iching_sid');
 if (sid) {
     const url = new URL(window.parent.location.href);
@@ -590,17 +568,12 @@ def show_register():
         else:
             sid = create_session(name.strip(), cat_name)
             add_message(sid, "customer", question.strip())
-            if st.secrets.get("anthropic_api_key"):
-                with st.spinner("小老師正在為您研讀卦象，請稍候⋯⋯"):
-                    reading = generate_iching_reading(cat_name, question.strip())
-                if reading:
-                    add_message(sid, "consultant", reading)
             send_notification(name.strip(), cat_name, question.strip(), sid)
             st.session_state.customer_sid = sid
             st.session_state.customer_name = name.strip()
             st.session_state.page = "chat"
             st.query_params["sid"] = sid
-            components.html(f"<script>localStorage.setItem('iching_sid','{sid}');</script>", height=0)
+            _components.html(f"<script>localStorage.setItem('iching_sid','{sid}');</script>", height=0)
             st.rerun()
 
 # ── Customer: Chat ────────────────────────────────────────────────────────────
@@ -654,7 +627,7 @@ def show_chat():
 
     if messages and messages[-1]["role"] == "customer":
         st.info("⏳ 小老師正在為您研讀卦象，請稍候⋯⋯")
-        components.html("""<script>
+        _components.html("""<script>
 setTimeout(function(){ window.parent.location.reload(); }, 30000);
 </script>""", height=0)
 
