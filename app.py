@@ -228,6 +228,8 @@ def create_session(name: str, category: str, phone: str = ""):
         st.error(f"建立諮詢失敗：{e}")
         return None
 
+_DB_ERROR = object()  # sentinel: DB unreachable (distinct from "session not found")
+
 def get_session_by_phone(phone: str):
     try:
         data = _get("sessions", {
@@ -238,9 +240,7 @@ def get_session_by_phone(phone: str):
         })
         return data[0] if data else None
     except Exception:
-        return None
-
-_DB_ERROR = object()  # sentinel: DB unreachable (distinct from "session not found")
+        return _DB_ERROR
 
 def get_session(sid: str):
     try:
@@ -584,7 +584,9 @@ if (sid) {
             phone_clean = lookup_phone.strip()
             if phone_clean:
                 sess = get_session_by_phone(phone_clean)
-                if sess:
+                if sess is _DB_ERROR:
+                    st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
+                elif sess:
                     found_sid = sess["session_id"]
                     st.session_state.customer_sid = found_sid
                     st.session_state.customer_name = sess["customer_name"]
