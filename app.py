@@ -1,5 +1,6 @@
 import streamlit as st
 import uuid
+import requests as _req
 from datetime import datetime
 
 # ── Page Config ───────────────────────────────────────────────────────────────
@@ -39,7 +40,6 @@ CATEGORIES = {
         "welcome": "此處為綜合命理分區。您可詢問整體運勢、流年運程、命盤走向、綜合解析等問題。靜心一念，易理自明。",
     },
 }
-
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -149,67 +149,47 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
 </style>
 """, unsafe_allow_html=True)
 
-# ── Database (Supabase) ───────────────────────────────────────────────────────
-@st.cache_resource
-def get_db():
-    from supabase import create_client
-    return create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
+# ── Database (requests, no supabase-py) ───────────────────────────────────────
+def _headers(extra=None):
+    key = st.secrets.get("supabase_key", "")
+    h = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+def _base():
+    return st.secrets.get("supabase_url", "").rstrip("/") + "/rest/v1"
+
+def _get(table, params=None):
+    r = _req.get(f"{_base()}/{table}", headers=_headers(), params=params, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _post(table, data, extra=None):
+    r = _req.post(f"{_base()}/{table}", headers=_headers(extra), json=data, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _patch(table, data, params=None):
+    r = _req.patch(f"{_base()}/{table}", headers=_headers(), json=data, params=params, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _delete(table, params=None):
+    r = _req.delete(f"{_base()}/{table}", headers=_headers(), params=params, timeout=10)
+    r.raise_for_status()
 
 def fmt_time(ts):
-    """Format Supabase ISO timestamp for display."""
     if not ts:
         return ""
     return str(ts)[:16].replace("T", " ")
 
-def _db_ok() -> bool:
-    try:
-        get_db().table("sessions").select("session_id").limit(1).execute()
-        return True
-    except Exception:
-        return False
-
-def create_session(name: str, category: str, pref: str) -> str:
-    sid = str(uuid.uuid4())[:8].upper()
-    try:
-        get_db().table("sessions").insert({
-            "session_id": sid,
-            "customer_name": name,
-            "category": category,
-            "preference": pref,
-        }).execute()
-    except Exception as e:
-        st.error(f"資料庫連線失敗，無法建立諮詢：{e}")
-    return sid
-
-def get_session(sid: str):
-    try:
-        r = get_db().table("sessions").select("*").eq("session_id", sid).limit(1).execute()
-        return r.data[0] if r.data else None
-    except Exception:
-        return None
-
-def add_message(sid: str, role: str, content: str):
-    try:
-        get_db().table("messages").insert({
-            "session_id": sid,
-            "role": role,
-            "content": content,
-        }).execute()
-        get_db().table("sessions").update({
-            "updated_at": datetime.utcnow().isoformat(),
-        }).eq("session_id", sid).execute()
-    except Exception as e:
-        st.error(f"訊息儲存失敗：{e}")
-
-def get_messages(sid: str):
-    try:
-        r = get_db().table("messages").select("*").eq("session_id", sid).order("created_at").execute()
-        return r.data
-    except Exception:
-        return []
-
 def _enrich(sessions):
-    """Attach msg_count / last_role / last_msg to each session row."""
     result = []
     for s in sessions:
         msgs = sorted(s.get("messages", []), key=lambda m: m["created_at"])
@@ -222,12 +202,50 @@ def _enrich(sessions):
         })
     return result
 
+def create_session(name: str, category: str) -> str:
+    sid = str(uuid.uuid4())[:8].upper()
+    try:
+        _post("sessions", {
+            "session_id": sid,
+            "customer_name": name,
+            "category": category,
+            "preference": "",
+        })
+    except Exception as e:
+        st.error(f"建立諮詢失敗：{e}")
+    return sid
+
+def get_session(sid: str):
+    try:
+        data = _get("sessions", {"session_id": f"eq.{sid}", "limit": "1"})
+        return data[0] if data else None
+    except Exception:
+        return None
+
+def add_message(sid: str, role: str, content: str):
+    try:
+        _post("messages", {"session_id": sid, "role": role, "content": content})
+        _patch("sessions", {"updated_at": datetime.utcnow().isoformat()},
+               {"session_id": f"eq.{sid}"})
+    except Exception as e:
+        st.error(f"訊息儲存失敗：{e}")
+
+def get_messages(sid: str):
+    try:
+        return _get("messages", {"session_id": f"eq.{sid}", "order": "created_at.asc"})
+    except Exception:
+        return []
+
 def get_all_sessions(cat_f=None, status_f=None):
     try:
-        q = get_db().table("sessions").select("*, messages(*)").eq("is_closed", False)
+        params = {
+            "select": "*,messages(*)",
+            "is_closed": "eq.false",
+            "order": "updated_at.desc",
+        }
         if cat_f and cat_f != "全部":
-            q = q.eq("category", cat_f)
-        rows = _enrich(q.order("updated_at", desc=True).execute().data)
+            params["category"] = f"eq.{cat_f}"
+        rows = _enrich(_get("sessions", params))
         if status_f == "待回覆":
             rows = [s for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0]
         elif status_f == "已解讀":
@@ -238,47 +256,41 @@ def get_all_sessions(cat_f=None, status_f=None):
 
 def close_session(sid: str):
     try:
-        get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
+        _patch("sessions", {"is_closed": True}, {"session_id": f"eq.{sid}"})
     except Exception as e:
         st.error(f"結案失敗：{e}")
 
+def delete_session(sid: str):
+    try:
+        _delete("messages", {"session_id": f"eq.{sid}"})
+        _delete("sessions", {"session_id": f"eq.{sid}"})
+    except Exception as e:
+        st.error(f"刪除失敗：{e}")
+
 def get_admin_password() -> str:
     try:
-        r = get_db().table("config").select("value").eq("key", "admin_password").limit(1).execute()
-        return r.data[0]["value"] if r.data else _FALLBACK_PW
+        data = _get("config", {"key": "eq.admin_password", "limit": "1"})
+        return data[0]["value"] if data else _FALLBACK_PW
     except Exception:
         return _FALLBACK_PW
 
 def set_admin_password(new_pw: str):
     try:
-        get_db().table("config").upsert({"key": "admin_password", "value": new_pw}).execute()
-    except Exception:
-        st.error("無法連接資料庫，請稍後再試")
-
-def show_db_debug():
-    st.markdown("### 🔧 連線診斷")
-    url = st.secrets.get("supabase_url", "❌ 未設定")
-    key = st.secrets.get("supabase_key", "❌ 未設定")
-    st.code(f"supabase_url = {repr(url)}\nsupabase_key = {repr(key[:20] + '...' if len(str(key)) > 20 else key)}")
-    try:
-        import socket
-        host = url.replace("https://", "").replace("http://", "").split("/")[0]
-        ip = socket.gethostbyname(host)
-        st.success(f"DNS OK：{host} → {ip}")
+        _post("config", {"key": "admin_password", "value": new_pw},
+              {"Prefer": "resolution=merge-duplicates,return=representation"})
     except Exception as e:
-        st.error(f"DNS 失敗：{e}")
+        st.error(f"無法更新密碼：{e}")
 
 def get_stats():
     try:
+        rows = _enrich(_get("sessions", {"select": "*,messages(*)", "is_closed": "eq.false"}))
         today = datetime.utcnow().strftime("%Y-%m-%d")
-        rows = _enrich(
-            get_db().table("sessions").select("*, messages(*)").eq("is_closed", False).execute().data
-        )
-        total   = len(rows)
-        today_n = sum(1 for s in rows if str(s.get("created_at", "")).startswith(today))
-        pending = sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0)
-        replied = sum(1 for s in rows if s["last_role"] == "consultant")
-        return {"total": total, "today": today_n, "pending": pending, "replied": replied}
+        return {
+            "total":   len(rows),
+            "today":   sum(1 for s in rows if str(s.get("created_at", "")).startswith(today)),
+            "pending": sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0),
+            "replied": sum(1 for s in rows if s["last_role"] == "consultant"),
+        }
     except Exception as e:
         st.warning(f"⚠️ 資料庫連線異常：{e}")
         return {"total": 0, "today": 0, "pending": 0, "replied": 0}
@@ -293,6 +305,7 @@ def init_state():
         "admin_status_filter": "全部",
         "customer_sid": None,
         "customer_name": "",
+        "selected_cat": None,
         "reply_ver": 0,
     }
     for k, v in defaults.items():
@@ -310,13 +323,14 @@ def init_state():
 
 init_state()
 
-# Manage App 按鈕：只有管理員模式才顯示
 if not st.session_state.admin_mode:
     st.markdown("""<style>
 #MainMenu { display: none !important; }
 footer    { display: none !important; }
 [data-testid="stToolbar"]         { display: none !important; }
+[data-testid="stStatusWidget"]    { display: none !important; }
 [data-testid="manage-app-button"] { display: none !important; }
+.stDeployButton                   { display: none !important; }
 </style>""", unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -354,18 +368,12 @@ with st.sidebar:
     else:
         st.markdown("## ☯ 洞察易生的經歷")
         st.markdown("---")
-        st.markdown("**📋 個人資料**")
-        new_name = st.text_input(
-            "您的姓名", value=st.session_state.customer_name, placeholder="請輸入姓名"
-        )
-        st.session_state.customer_name = new_name
-        st.markdown("---")
 
         if st.session_state.page == "chat" and st.session_state.customer_sid:
             sid = st.session_state.customer_sid
             sess = get_session(sid)
             if sess:
-                icon = CATEGORIES[sess["category"]]["icon"]
+                icon = CATEGORIES.get(sess["category"], {}).get("icon", "☯")
                 st.markdown(f"**目前分區：** {icon} {sess['category']}")
                 st.markdown("**您的諮詢編號：**")
                 st.markdown(f'<div class="sid-box">{sid}</div>', unsafe_allow_html=True)
@@ -375,16 +383,20 @@ with st.sidebar:
                 st.session_state.customer_sid = None
                 st.query_params.clear()
                 st.rerun()
+        elif st.session_state.page == "register":
+            if st.button("← 返回", use_container_width=True):
+                st.session_state.page = "home"
+                st.session_state.selected_cat = None
+                st.rerun()
         else:
             st.markdown("**目前位置：首頁**")
 
         st.markdown("---")
         st.markdown("""<small>
 <b>使用說明</b><br>
-① 填寫姓名與解讀偏好<br>
-② 選擇諮詢分區<br>
-③ 輸入您想詢問的問題<br>
-④ 靜候顧問解讀回覆<br><br>
+① 選擇諮詢分區<br>
+② 填寫姓名與問題<br>
+③ 靜候顧問解讀回覆<br><br>
 請保存諮詢編號以便日後查閱。
 </small>""", unsafe_allow_html=True)
 
@@ -408,16 +420,11 @@ def show_home():
     )
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
 
-    name = st.session_state.customer_name or "訪客"
-    st.markdown(f"""<div class="info-box">
-　歡迎，<b>{name}</b>。<br><br>
+    st.markdown("""<div class="info-box">
 　《易經》六十四卦，象天地萬物之變化，述人事吉凶之道理。<br>
 　問題無需複雜，一心一念即可，顧問將為您逐一卜卦解析。<br><br>
-　請選擇下方分區，進入後輸入您的問題。
+　請選擇下方分區，進入後填寫姓名與問題，靜候顧問解讀。
 </div>""", unsafe_allow_html=True)
-
-    if not st.session_state.customer_name:
-        st.warning("請先在左側欄填入您的姓名，再進入諮詢分區。")
 
     cats = list(CATEGORIES.items())
     col_a, col_b = st.columns(2, gap="large")
@@ -429,17 +436,54 @@ def show_home():
 <div class="cat-name">{cat_name}</div>
 <div class="cat-desc">{info["desc"]}</div>
 </div>""", unsafe_allow_html=True)
-            disabled = not st.session_state.customer_name
-            if st.button("進入諮詢", key=f"enter_{cat_name}", use_container_width=True, disabled=disabled):
-                sid = create_session(
-                    st.session_state.customer_name,
-                    cat_name,
-                    "",
-                )
-                st.session_state.customer_sid = sid
-                st.session_state.page = "chat"
-                st.query_params["sid"] = sid
+            if st.button("進入諮詢", key=f"enter_{cat_name}", use_container_width=True):
+                st.session_state.selected_cat = cat_name
+                st.session_state.page = "register"
                 st.rerun()
+
+# ── Customer: Register ────────────────────────────────────────────────────────
+def show_register():
+    cat_name = st.session_state.selected_cat
+    if not cat_name:
+        st.session_state.page = "home"
+        st.rerun()
+        return
+
+    info = CATEGORIES[cat_name]
+
+    st.markdown(f"""<div class="chat-hdr">
+<span style="font-size:2rem;">{info["icon"]}</span>
+<span>
+<div class="chat-hdr-title">{cat_name}</div>
+<div class="chat-hdr-sub">{info["desc"]}</div>
+</span>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown('<hr class="g-div">', unsafe_allow_html=True)
+    st.markdown(f'<div class="info-box">{info["welcome"]}</div>', unsafe_allow_html=True)
+
+    with st.form("register_form"):
+        name = st.text_input("您的姓名", placeholder="請輸入姓名")
+        question = st.text_area(
+            "您的問題",
+            placeholder="請輸入您想詢問的問題⋯⋯",
+            height=140,
+        )
+        submitted = st.form_submit_button("提交問卦 →", use_container_width=True)
+
+    if submitted:
+        if not name.strip():
+            st.error("請填寫姓名")
+        elif not question.strip():
+            st.error("請填寫問題")
+        else:
+            sid = create_session(name.strip(), cat_name)
+            add_message(sid, "customer", question.strip())
+            st.session_state.customer_sid = sid
+            st.session_state.customer_name = name.strip()
+            st.session_state.page = "chat"
+            st.query_params["sid"] = sid
+            st.rerun()
 
 # ── Customer: Chat ────────────────────────────────────────────────────────────
 def show_chat():
@@ -455,7 +499,7 @@ def show_chat():
         return
 
     category = sess["category"]
-    info = CATEGORIES[category]
+    info = CATEGORIES.get(category, {"icon": "☯", "desc": ""})
 
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
@@ -480,13 +524,6 @@ def show_chat():
 
     messages = get_messages(sid)
 
-    if not messages:
-        st.markdown(
-            f'<div class="info-box">{info["welcome"]}<br><br>'
-            f'靜心一念，易理自明。請在下方輸入您想詢問的問題。</div>',
-            unsafe_allow_html=True,
-        )
-
     for msg in messages:
         if msg["role"] == "customer":
             with st.chat_message("user", avatar="🙏"):
@@ -500,14 +537,13 @@ def show_chat():
     if messages and messages[-1]["role"] == "customer":
         st.info("⏳ 顧問正在為您研讀卦象，請稍候。可按「重新整理」查看最新回覆。")
 
-    user_q = st.chat_input("請輸入您的問題⋯⋯")
+    user_q = st.chat_input("繼續提問⋯⋯")
     if user_q:
         add_message(sid, "customer", user_q)
         st.rerun()
 
 # ── Admin: Dashboard ──────────────────────────────────────────────────────────
 def show_admin():
-    show_db_debug()
     stats = get_stats()
 
     st.markdown("""<div class="admin-hdr">
@@ -581,7 +617,7 @@ def show_admin():
   {status_html}
 </div>
 <div class="sess-meta">
-  編號：{s['session_id']} · {s.get('preference') or '未設定'} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
+  編號：{s['session_id']} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
 <div class="sess-preview">💬 {preview}</div>
 </div>""", unsafe_allow_html=True)
@@ -606,9 +642,8 @@ def show_admin_reply():
         return
 
     category = sess["category"]
-    info = CATEGORIES[category]
+    info = CATEGORIES.get(category, {"icon": "☯", "desc": ""})
 
-    _, _ = st.columns([1, 6])
     if st.button("← 後台"):
         st.session_state.page = "admin"
         st.session_state.admin_reply_sid = None
@@ -618,7 +653,7 @@ def show_admin_reply():
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
 <div class="chat-hdr-title">{sess['customer_name']} · {category}</div>
-<div class="chat-hdr-sub">編號：{sid} · {sess.get('preference', '')} · 建立：{fmt_time(sess['created_at'])}</div>
+<div class="chat-hdr-sub">編號：{sid} · 建立：{fmt_time(sess['created_at'])}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
@@ -648,7 +683,7 @@ def show_admin_reply():
         key=f"reply_txt_{st.session_state.reply_ver}",
         label_visibility="collapsed",
     )
-    r1, r2, r3 = st.columns(3)
+    r1, r2, r3, r4 = st.columns(4)
     with r1:
         if st.button("📤 發送解讀", use_container_width=True):
             if reply.strip():
@@ -662,6 +697,12 @@ def show_admin_reply():
     with r3:
         if st.button("✅ 結案歸檔", use_container_width=True):
             close_session(sid)
+            st.session_state.page = "admin"
+            st.session_state.admin_reply_sid = None
+            st.rerun()
+    with r4:
+        if st.button("🗑️ 刪除問卦", use_container_width=True):
+            delete_session(sid)
             st.session_state.page = "admin"
             st.session_state.admin_reply_sid = None
             st.rerun()
@@ -680,6 +721,8 @@ if st.session_state.admin_mode:
 else:
     if page == "home":
         show_home()
+    elif page == "register":
+        show_register()
     elif page == "chat":
         show_chat()
     else:
