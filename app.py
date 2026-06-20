@@ -24,7 +24,7 @@ CATEGORIES = {
         "welcome": "此處為事業與學業分區。您可詢問職涯方向、工作決策、創業規劃、學習進修等問題。靜心一念，易理自明。",
     },
     "財運與財務": {
-        "icon": "🪙", "desc": "財富運勢、投資理財、商業機遇",
+        "icon": "💰", "desc": "財富運勢、投資理財、商業機遇",
         "welcome": "此處為財運與財務分區。您可詢問財富運勢、投資時機、商業決策、錢財去留等問題。靜心一念，易理自明。",
     },
     "健康與生活": {
@@ -338,7 +338,7 @@ with st.sidebar:
     if st.session_state.admin_mode:
         st.markdown("## 🔐 管理後台")
         st.markdown("---")
-        st.markdown("**✅ 顧問模式啟動**")
+        st.markdown("**✅ 易師模式啟動**")
         st.markdown("---")
         if st.button("← 回到後台首頁", use_container_width=True):
             st.session_state.page = "admin"
@@ -421,9 +421,10 @@ def show_home():
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
 
     st.markdown("""<div class="info-box">
-　《易經》六十四卦，象天地萬物之變化，述人事吉凶之道理。<br>
-　問題無需複雜，一心一念即可，顧問將為您逐一卜卦解析。<br><br>
-　請選擇下方分區，進入後填寫姓名與問題，靜候顧問解讀。
+　《易經》六十四卦，象天地萬物之變化，述人事吉凶之道理。<br><br>
+　<b>每次請提出一個問題，敘述越直觀越好。</b><br>
+　例如：「我與某人的感情走向如何？」、「這份工作適合我嗎？」<br><br>
+　選擇分區後填寫姓名與問題，靜候易師為您解卦。
 </div>""", unsafe_allow_html=True)
 
     cats = list(CATEGORIES.items())
@@ -531,11 +532,11 @@ def show_chat():
                 st.caption(fmt_time(msg["created_at"]))
         else:
             with st.chat_message("assistant", avatar="☯"):
-                st.markdown(f"**【易經顧問解讀】**\n\n{msg['content']}")
+                st.markdown(f"**【易師解卦】**\n\n{msg['content']}")
                 st.caption(fmt_time(msg["created_at"]))
 
     if messages and messages[-1]["role"] == "customer":
-        st.info("⏳ 顧問正在為您研讀卦象，請稍候。可按「重新整理」查看最新回覆。")
+        st.info("⏳ 易師正在為您研讀卦象，請稍候。可按「重新整理」查看最新回覆。")
 
     user_q = st.chat_input("繼續提問⋯⋯")
     if user_q:
@@ -550,7 +551,7 @@ def show_admin():
 <span style="font-size:2rem;">🔐</span>
 <span>
 <div style="font-size:1.3rem;font-weight:700;letter-spacing:0.1em;">洞察易生的經歷 · 管理後台</div>
-<div style="font-size:0.82rem;color:#B8A070;margin-top:4px;">易經顧問專用 · 查閱與回覆所有來訪問卦</div>
+<div style="font-size:0.82rem;color:#B8A070;margin-top:4px;">易師專用後台 · 查閱與回覆所有來訪問卦</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
@@ -670,7 +671,7 @@ def show_admin_reply():
                     st.caption(fmt_time(msg["created_at"]))
             else:
                 with st.chat_message("assistant", avatar="☯"):
-                    st.markdown(f"**【顧問解讀】**\n\n{msg['content']}")
+                    st.markdown(f"**【易師解卦】**\n\n{msg['content']}")
                     st.caption(fmt_time(msg["created_at"]))
 
     st.markdown("---")
