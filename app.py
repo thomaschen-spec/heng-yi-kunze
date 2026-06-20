@@ -219,11 +219,17 @@ def close_session(sid: str):
     get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
 
 def get_admin_password() -> str:
-    r = get_db().table("config").select("value").eq("key", "admin_password").limit(1).execute()
-    return r.data[0]["value"] if r.data else _FALLBACK_PW
+    try:
+        r = get_db().table("config").select("value").eq("key", "admin_password").limit(1).execute()
+        return r.data[0]["value"] if r.data else _FALLBACK_PW
+    except Exception:
+        return _FALLBACK_PW
 
 def set_admin_password(new_pw: str):
-    get_db().table("config").upsert({"key": "admin_password", "value": new_pw}).execute()
+    try:
+        get_db().table("config").upsert({"key": "admin_password", "value": new_pw}).execute()
+    except Exception:
+        st.error("無法連接資料庫，請稍後再試")
 
 def get_stats():
     today = datetime.utcnow().strftime("%Y-%m-%d")
