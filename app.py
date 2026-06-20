@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-ADMIN_PASSWORD = st.secrets.get("admin_password", "kunze2024")
+_FALLBACK_PW = st.secrets.get("admin_password", "kunze2024")
 
 CATEGORIES = {
     "感情與人際": {
@@ -222,6 +222,13 @@ def get_all_sessions(cat_f=None, status_f=None):
 def close_session(sid: str):
     get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
 
+def get_admin_password() -> str:
+    r = get_db().table("config").select("value").eq("key", "admin_password").limit(1).execute()
+    return r.data[0]["value"] if r.data else _FALLBACK_PW
+
+def set_admin_password(new_pw: str):
+    get_db().table("config").upsert({"key": "admin_password", "value": new_pw}).execute()
+
 def get_stats():
     today = datetime.utcnow().strftime("%Y-%m-%d")
     rows = _enrich(
@@ -277,6 +284,23 @@ with st.sidebar:
             st.session_state.admin_mode = False
             st.session_state.page = "home"
             st.rerun()
+        st.markdown("---")
+        with st.expander("🔑 更改管理密碼"):
+            old_pw  = st.text_input("目前密碼", type="password", key="chpw_old")
+            new_pw  = st.text_input("新密碼",   type="password", key="chpw_new")
+            new_pw2 = st.text_input("確認新密碼", type="password", key="chpw_new2")
+            if st.button("確認更改", use_container_width=True, key="chpw_btn"):
+                if not old_pw or not new_pw:
+                    st.error("請填寫所有欄位")
+                elif old_pw != get_admin_password():
+                    st.error("目前密碼錯誤")
+                elif new_pw != new_pw2:
+                    st.error("兩次新密碼不一致")
+                elif len(new_pw) < 6:
+                    st.error("新密碼至少 6 個字元")
+                else:
+                    set_admin_password(new_pw)
+                    st.success("密碼已更新")
     else:
         st.markdown("## ☯ 洞察易經的人生")
         st.markdown("---")
@@ -323,7 +347,7 @@ with st.sidebar:
         with st.expander("🔐 管理入口"):
             pw = st.text_input("管理密碼", type="password", key="admin_pw")
             if st.button("進入管理後台", use_container_width=True):
-                if pw == ADMIN_PASSWORD:
+                if pw == get_admin_password():
                     st.session_state.admin_mode = True
                     st.session_state.page = "admin"
                     st.rerun()
