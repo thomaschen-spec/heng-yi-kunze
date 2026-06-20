@@ -4,6 +4,7 @@ import uuid
 import requests as _req
 import html as _html
 from datetime import datetime, timezone, timedelta
+from streamlit_autorefresh import st_autorefresh
 
 _TAIWAN = timezone(timedelta(hours=8))
 
@@ -726,7 +727,6 @@ def show_chat():
 
     if messages and messages[-1]["role"] == "customer":
         st.info("⏳ 小老師正在為您研讀卦象，請稍候⋯⋯")
-        from streamlit_autorefresh import st_autorefresh
         st_autorefresh(interval=20000, key="chat_autorefresh")
 
     user_q = st.chat_input("繼續提問⋯⋯")
