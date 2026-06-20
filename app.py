@@ -247,13 +247,15 @@ def get_session(sid: str):
     except Exception:
         return None
 
-def add_message(sid: str, role: str, content: str):
+def add_message(sid: str, role: str, content: str) -> bool:
     try:
         _post("messages", {"session_id": sid, "role": role, "content": content})
         _patch("sessions", {"updated_at": datetime.now(timezone.utc).isoformat()},
                {"session_id": f"eq.{sid}"})
+        return True
     except Exception as e:
         st.error(f"訊息儲存失敗：{e}")
+        return False
 
 def get_messages(sid: str):
     try:
@@ -633,7 +635,8 @@ def show_register():
             sid = create_session(name.strip(), cat_name, phone.strip())
             if not sid:
                 return
-            add_message(sid, "customer", question.strip())
+            if not add_message(sid, "customer", question.strip()):
+                return
             send_notification(name.strip(), cat_name, question.strip(), sid)
             st.success("問卦已送出，正在跳轉⋯⋯")
             _components.html(f"""<script>
