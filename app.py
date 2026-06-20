@@ -162,33 +162,52 @@ def fmt_time(ts):
         return ""
     return str(ts)[:16].replace("T", " ")
 
+def _db_ok() -> bool:
+    try:
+        get_db().table("sessions").select("session_id").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
 def create_session(name: str, category: str, pref: str) -> str:
     sid = str(uuid.uuid4())[:8].upper()
-    get_db().table("sessions").insert({
-        "session_id": sid,
-        "customer_name": name,
-        "category": category,
-        "preference": pref,
-    }).execute()
+    try:
+        get_db().table("sessions").insert({
+            "session_id": sid,
+            "customer_name": name,
+            "category": category,
+            "preference": pref,
+        }).execute()
+    except Exception as e:
+        st.error(f"資料庫連線失敗，無法建立諮詢：{e}")
     return sid
 
 def get_session(sid: str):
-    r = get_db().table("sessions").select("*").eq("session_id", sid).limit(1).execute()
-    return r.data[0] if r.data else None
+    try:
+        r = get_db().table("sessions").select("*").eq("session_id", sid).limit(1).execute()
+        return r.data[0] if r.data else None
+    except Exception:
+        return None
 
 def add_message(sid: str, role: str, content: str):
-    get_db().table("messages").insert({
-        "session_id": sid,
-        "role": role,
-        "content": content,
-    }).execute()
-    get_db().table("sessions").update({
-        "updated_at": datetime.utcnow().isoformat(),
-    }).eq("session_id", sid).execute()
+    try:
+        get_db().table("messages").insert({
+            "session_id": sid,
+            "role": role,
+            "content": content,
+        }).execute()
+        get_db().table("sessions").update({
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("session_id", sid).execute()
+    except Exception as e:
+        st.error(f"訊息儲存失敗：{e}")
 
 def get_messages(sid: str):
-    r = get_db().table("messages").select("*").eq("session_id", sid).order("created_at").execute()
-    return r.data
+    try:
+        r = get_db().table("messages").select("*").eq("session_id", sid).order("created_at").execute()
+        return r.data
+    except Exception:
+        return []
 
 def _enrich(sessions):
     """Attach msg_count / last_role / last_msg to each session row."""
@@ -205,18 +224,24 @@ def _enrich(sessions):
     return result
 
 def get_all_sessions(cat_f=None, status_f=None):
-    q = get_db().table("sessions").select("*, messages(*)").eq("is_closed", False)
-    if cat_f and cat_f != "全部":
-        q = q.eq("category", cat_f)
-    rows = _enrich(q.order("updated_at", desc=True).execute().data)
-    if status_f == "待回覆":
-        rows = [s for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0]
-    elif status_f == "已解讀":
-        rows = [s for s in rows if s["last_role"] == "consultant"]
-    return rows
+    try:
+        q = get_db().table("sessions").select("*, messages(*)").eq("is_closed", False)
+        if cat_f and cat_f != "全部":
+            q = q.eq("category", cat_f)
+        rows = _enrich(q.order("updated_at", desc=True).execute().data)
+        if status_f == "待回覆":
+            rows = [s for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0]
+        elif status_f == "已解讀":
+            rows = [s for s in rows if s["last_role"] == "consultant"]
+        return rows
+    except Exception:
+        return []
 
 def close_session(sid: str):
-    get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
+    try:
+        get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
+    except Exception as e:
+        st.error(f"結案失敗：{e}")
 
 def get_admin_password() -> str:
     try:
@@ -232,15 +257,19 @@ def set_admin_password(new_pw: str):
         st.error("無法連接資料庫，請稍後再試")
 
 def get_stats():
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    rows = _enrich(
-        get_db().table("sessions").select("*, messages(*)").eq("is_closed", False).execute().data
-    )
-    total   = len(rows)
-    today_n = sum(1 for s in rows if str(s.get("created_at", "")).startswith(today))
-    pending = sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0)
-    replied = sum(1 for s in rows if s["last_role"] == "consultant")
-    return {"total": total, "today": today_n, "pending": pending, "replied": replied}
+    try:
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        rows = _enrich(
+            get_db().table("sessions").select("*, messages(*)").eq("is_closed", False).execute().data
+        )
+        total   = len(rows)
+        today_n = sum(1 for s in rows if str(s.get("created_at", "")).startswith(today))
+        pending = sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0)
+        replied = sum(1 for s in rows if s["last_role"] == "consultant")
+        return {"total": total, "today": today_n, "pending": pending, "replied": replied}
+    except Exception as e:
+        st.warning(f"⚠️ 資料庫連線異常：{e}")
+        return {"total": 0, "today": 0, "pending": 0, "replied": 0}
 
 # ── Session State Init ────────────────────────────────────────────────────────
 def init_state():
