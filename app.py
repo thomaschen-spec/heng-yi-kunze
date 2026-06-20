@@ -1,8 +1,6 @@
 import streamlit as st
-import sqlite3
 import uuid
 from datetime import datetime
-import os
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -14,7 +12,6 @@ st.set_page_config(
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ADMIN_PASSWORD = st.secrets.get("admin_password", "kunze2024")
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "consultations.db")
 
 CATEGORIES = {
     "感情與人際": {
@@ -68,11 +65,10 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
     background: #2A3A28 !important;
     border: 1px solid #4A6040 !important;
 }
-
 .main-title {
     text-align: center; color: #3D2B1F;
-    font-size: 2.8rem; font-weight: 700;
-    letter-spacing: 0.4em; padding-top: 1rem;
+    font-size: 2.6rem; font-weight: 700;
+    letter-spacing: 0.3em; padding-top: 1rem;
     text-shadow: 1px 2px 6px rgba(139,105,20,0.18);
 }
 .main-subtitle {
@@ -104,8 +100,6 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
 }
 .badge-red   { background: #C43A2A; }
 .badge-green { background: #3A8A4A; }
-.badge-gold  { background: #C4922A; }
-
 .chat-hdr {
     background: linear-gradient(135deg, #2D3B2A, #3D5438);
     color: #E8D5A3; padding: 16px 24px; border-radius: 14px; margin-bottom: 16px;
@@ -113,7 +107,6 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
 }
 .chat-hdr-title { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.1em; }
 .chat-hdr-sub   { font-size: 0.8rem; color: #B8A070; margin-top: 4px; }
-
 .admin-hdr {
     background: linear-gradient(135deg, #1E2B1C, #2D3B2A);
     color: #E8D5A3; padding: 18px 28px; border-radius: 14px; margin-bottom: 20px;
@@ -126,7 +119,6 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
 }
 .stat-num   { font-size: 2rem; font-weight: 700; color: #C4922A; }
 .stat-label { font-size: 0.78rem; color: #7A5C3A; }
-
 .sess-card {
     background: #FFF8E7; border: 1px solid #D4A843;
     border-radius: 10px; padding: 14px 18px; margin-bottom: 10px;
@@ -139,14 +131,12 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
     font-size: 0.85rem; color: #5A4030; margin-top: 8px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-
 .sid-box {
     background: #2D3B2A; color: #A0C870;
     font-family: monospace; font-size: 1.15rem; font-weight: 700;
     padding: 8px 16px; border-radius: 8px; letter-spacing: 0.2em;
     display: inline-block; margin: 4px 0;
 }
-
 .stButton > button {
     font-family: 'Noto Serif TC', serif !important; font-weight: 600;
     letter-spacing: 0.05em; border-radius: 8px !important; border: none !important;
@@ -160,119 +150,83 @@ html, body, [class*="css"] { font-family: 'Noto Serif TC', 'Noto Serif', serif; 
 </style>
 """, unsafe_allow_html=True)
 
-# ── Database ──────────────────────────────────────────────────────────────────
-def _conn():
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+# ── Database (Supabase) ───────────────────────────────────────────────────────
+@st.cache_resource
+def get_db():
+    from supabase import create_client
+    return create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 
-def init_db():
-    c = _conn()
-    c.executescript("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id    TEXT PRIMARY KEY,
-            customer_name TEXT NOT NULL,
-            category      TEXT NOT NULL,
-            preference    TEXT,
-            created_at    TEXT NOT NULL,
-            updated_at    TEXT NOT NULL,
-            is_closed     INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS messages (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role       TEXT NOT NULL,
-            content    TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-        );
-    """)
-    c.commit()
-    c.close()
-
-init_db()
-
-def _now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def fmt_time(ts):
+    """Format Supabase ISO timestamp for display."""
+    if not ts:
+        return ""
+    return str(ts)[:16].replace("T", " ")
 
 def create_session(name: str, category: str, pref: str) -> str:
     sid = str(uuid.uuid4())[:8].upper()
-    now = _now()
-    c = _conn()
-    c.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,0)", (sid, name, category, pref, now, now))
-    c.commit()
-    c.close()
+    get_db().table("sessions").insert({
+        "session_id": sid,
+        "customer_name": name,
+        "category": category,
+        "preference": pref,
+    }).execute()
     return sid
 
 def get_session(sid: str):
-    c = _conn()
-    r = c.execute("SELECT * FROM sessions WHERE session_id=?", (sid,)).fetchone()
-    c.close()
-    return r
+    r = get_db().table("sessions").select("*").eq("session_id", sid).limit(1).execute()
+    return r.data[0] if r.data else None
 
 def add_message(sid: str, role: str, content: str):
-    now = _now()
-    c = _conn()
-    c.execute(
-        "INSERT INTO messages (session_id,role,content,created_at) VALUES (?,?,?,?)",
-        (sid, role, content, now)
-    )
-    c.execute("UPDATE sessions SET updated_at=? WHERE session_id=?", (now, sid))
-    c.commit()
-    c.close()
+    get_db().table("messages").insert({
+        "session_id": sid,
+        "role": role,
+        "content": content,
+    }).execute()
+    get_db().table("sessions").update({
+        "updated_at": datetime.utcnow().isoformat(),
+    }).eq("session_id", sid).execute()
 
 def get_messages(sid: str):
-    c = _conn()
-    r = c.execute(
-        "SELECT * FROM messages WHERE session_id=? ORDER BY created_at", (sid,)
-    ).fetchall()
-    c.close()
-    return r
+    r = get_db().table("messages").select("*").eq("session_id", sid).order("created_at").execute()
+    return r.data
+
+def _enrich(sessions):
+    """Attach msg_count / last_role / last_msg to each session row."""
+    result = []
+    for s in sessions:
+        msgs = sorted(s.get("messages", []), key=lambda m: m["created_at"])
+        last = msgs[-1] if msgs else None
+        result.append({
+            **s,
+            "msg_count": len(msgs),
+            "last_role": last["role"] if last else None,
+            "last_msg":  last["content"] if last else None,
+        })
+    return result
 
 def get_all_sessions(cat_f=None, status_f=None):
-    c = _conn()
-    q = """
-        SELECT s.*,
-            (SELECT COUNT(*) FROM messages m WHERE m.session_id=s.session_id) AS msg_count,
-            (SELECT role    FROM messages m WHERE m.session_id=s.session_id ORDER BY created_at DESC LIMIT 1) AS last_role,
-            (SELECT content FROM messages m WHERE m.session_id=s.session_id ORDER BY created_at DESC LIMIT 1) AS last_msg
-        FROM sessions s WHERE s.is_closed=0
-    """
-    params = []
+    q = get_db().table("sessions").select("*, messages(*)").eq("is_closed", False)
     if cat_f and cat_f != "全部":
-        q += " AND s.category=?"
-        params.append(cat_f)
-    q += " ORDER BY s.updated_at DESC"
-    rows = c.execute(q, params).fetchall()
-    c.close()
+        q = q.eq("category", cat_f)
+    rows = _enrich(q.order("updated_at", desc=True).execute().data)
     if status_f == "待回覆":
-        rows = [r for r in rows if r["last_role"] == "customer" or r["msg_count"] == 0]
+        rows = [s for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0]
     elif status_f == "已解讀":
-        rows = [r for r in rows if r["last_role"] == "consultant"]
+        rows = [s for s in rows if s["last_role"] == "consultant"]
     return rows
 
 def close_session(sid: str):
-    c = _conn()
-    c.execute("UPDATE sessions SET is_closed=1 WHERE session_id=?", (sid,))
-    c.commit()
-    c.close()
+    get_db().table("sessions").update({"is_closed": True}).eq("session_id", sid).execute()
 
 def get_stats():
-    today = datetime.now().strftime("%Y-%m-%d")
-    c = _conn()
-    total   = c.execute("SELECT COUNT(*) FROM sessions WHERE is_closed=0").fetchone()[0]
-    today_n = c.execute("SELECT COUNT(*) FROM sessions WHERE date(created_at)=?", (today,)).fetchone()[0]
-    pending = c.execute("""
-        SELECT COUNT(*) FROM sessions s WHERE s.is_closed=0
-        AND (SELECT role FROM messages m WHERE m.session_id=s.session_id
-             ORDER BY created_at DESC LIMIT 1) = 'customer'
-    """).fetchone()[0]
-    replied = c.execute("""
-        SELECT COUNT(*) FROM sessions s WHERE s.is_closed=0
-        AND (SELECT role FROM messages m WHERE m.session_id=s.session_id
-             ORDER BY created_at DESC LIMIT 1) = 'consultant'
-    """).fetchone()[0]
-    c.close()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    rows = _enrich(
+        get_db().table("sessions").select("*, messages(*)").eq("is_closed", False).execute().data
+    )
+    total   = len(rows)
+    today_n = sum(1 for s in rows if str(s.get("created_at", "")).startswith(today))
+    pending = sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0)
+    replied = sum(1 for s in rows if s["last_role"] == "consultant")
     return {"total": total, "today": today_n, "pending": pending, "replied": replied}
 
 # ── Session State Init ────────────────────────────────────────────────────────
@@ -292,7 +246,6 @@ def init_state():
         if k not in st.session_state:
             st.session_state[k] = v
 
-    # Restore session from URL query param
     params = st.query_params
     if "sid" in params and st.session_state.customer_sid is None:
         sid = params["sid"]
@@ -300,7 +253,7 @@ def init_state():
         if sess and not sess["is_closed"]:
             st.session_state.customer_sid = sid
             st.session_state.customer_name = sess["customer_name"]
-            st.session_state.customer_pref = sess["preference"] or PREFERENCES[0]
+            st.session_state.customer_pref = sess.get("preference") or PREFERENCES[0]
             st.session_state.page = "chat"
 
 init_state()
@@ -323,19 +276,16 @@ with st.sidebar:
     else:
         st.markdown("## ☯ 洞察易經的人生")
         st.markdown("---")
-        st.markdown("**📋 個人檔案**")
-
+        st.markdown("**📋 個人資料**")
         new_name = st.text_input(
             "您的姓名", value=st.session_state.customer_name, placeholder="請輸入姓名"
         )
         st.session_state.customer_name = new_name
-
         new_pref = st.selectbox(
             "解讀偏好", PREFERENCES,
             index=PREFERENCES.index(st.session_state.customer_pref)
         )
         st.session_state.customer_pref = new_pref
-
         st.markdown("---")
 
         if st.session_state.page == "chat" and st.session_state.customer_sid:
@@ -360,7 +310,7 @@ with st.sidebar:
 <b>使用說明</b><br>
 ① 填寫姓名與解讀偏好<br>
 ② 選擇諮詢分區<br>
-③ 輸入您的問題<br>
+③ 輸入您想詢問的問題<br>
 ④ 靜候顧問解讀回覆<br><br>
 請保存諮詢編號以便日後查閱。
 </small>""", unsafe_allow_html=True)
@@ -391,7 +341,7 @@ def show_home():
 　歡迎，<b>{name}</b>。<br><br>
 　《易經》六十四卦，象天地萬物之變化，述人事吉凶之道理。<br>
 　本館採「<b>{pref}</b>」為您解讀，問題無需複雜，一心一念即可。<br><br>
-　請選擇下方分區，進入後輸入您的問題，顧問將為您逐一解析。
+　請選擇下方分區，進入後輸入您的問題，顧問將為您逐一卜卦解析。
 </div>""", unsafe_allow_html=True)
 
     if not st.session_state.customer_name:
@@ -469,11 +419,11 @@ def show_chat():
         if msg["role"] == "customer":
             with st.chat_message("user", avatar="🙏"):
                 st.markdown(msg["content"])
-                st.caption(msg["created_at"])
+                st.caption(fmt_time(msg["created_at"]))
         else:
             with st.chat_message("assistant", avatar="☯"):
                 st.markdown(f"**【易經顧問解讀】**\n\n{msg['content']}")
-                st.caption(msg["created_at"])
+                st.caption(fmt_time(msg["created_at"]))
 
     if messages and messages[-1]["role"] == "customer":
         st.info("⏳ 顧問正在為您研讀卦象，請稍候。可按「重新整理」查看最新回覆。")
@@ -491,16 +441,16 @@ def show_admin():
 <span style="font-size:2rem;">🔐</span>
 <span>
 <div style="font-size:1.3rem;font-weight:700;letter-spacing:0.1em;">洞察易經的人生 · 管理後台</div>
-<div style="font-size:0.82rem;color:#B8A070;margin-top:4px;">易經顧問專用 · 查閱與回覆所有諮詢</div>
+<div style="font-size:0.82rem;color:#B8A070;margin-top:4px;">易經顧問專用 · 查閱與回覆所有來訪問卦</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
     cs = st.columns(4)
     for col, (label, val, icon) in zip(cs, [
-        ("今日新增", stats["today"], "📅"),
-        ("進行中",  stats["total"],  "📂"),
-        ("待回覆",  stats["pending"], "🔴"),
-        ("已解讀",  stats["replied"], "✅"),
+        ("今日新增",  stats["today"],   "📅"),
+        ("進行中",    stats["total"],   "📂"),
+        ("待回覆",    stats["pending"], "🔴"),
+        ("已解讀",    stats["replied"], "✅"),
     ]):
         with col:
             st.markdown(f"""<div class="stat-box">
@@ -521,8 +471,7 @@ def show_admin():
     with fc2:
         cat_opts = ["全部"] + list(CATEGORIES.keys())
         cf = st.selectbox(
-            "分區",
-            cat_opts,
+            "分區", cat_opts,
             index=cat_opts.index(st.session_state.admin_cat_filter),
         )
         st.session_state.admin_cat_filter = cf
@@ -532,22 +481,22 @@ def show_admin():
         status_f=st.session_state.admin_status_filter,
     )
 
-    st.markdown(f"**共 {len(sessions)} 筆諮詢**")
+    st.markdown(f"**共 {len(sessions)} 筆問卦**")
 
     if not sessions:
-        st.markdown('<div class="info-box">目前沒有符合條件的諮詢記錄。</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">目前沒有符合條件的問卦記錄。</div>', unsafe_allow_html=True)
         return
 
     for s in sessions:
         is_pending = s["last_role"] == "customer" or s["msg_count"] == 0
         css_cls = "pending" if is_pending else "replied"
         status_html = (
-            '<span class="badge badge-red">🔴 待回覆</span>'
+            '<span class="badge badge-red">🔴 待解讀</span>'
             if is_pending else
             '<span class="badge badge-green">✅ 已解讀</span>'
         )
         cat_icon = CATEGORIES.get(s["category"], {}).get("icon", "☯")
-        preview = (s["last_msg"] or "（尚未提問）")
+        preview = s["last_msg"] or "（尚未提問）"
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
 
         ci, cb = st.columns([4, 1])
@@ -559,7 +508,7 @@ def show_admin():
   {status_html}
 </div>
 <div class="sess-meta">
-  編號：{s['session_id']} · {s['preference'] or '未設定'} · {s['msg_count']} 則 · {s['updated_at']}
+  編號：{s['session_id']} · {s.get('preference') or '未設定'} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
 <div class="sess-preview">💬 {preview}</div>
 </div>""", unsafe_allow_html=True)
@@ -580,24 +529,23 @@ def show_admin_reply():
 
     sess = get_session(sid)
     if not sess:
-        st.error("找不到此諮詢記錄。")
+        st.error("找不到此問卦記錄。")
         return
 
     category = sess["category"]
     info = CATEGORIES[category]
 
-    _, cb = st.columns([1, 6])
-    with _:
-        if st.button("← 後台"):
-            st.session_state.page = "admin"
-            st.session_state.admin_reply_sid = None
-            st.rerun()
+    _, _ = st.columns([1, 6])
+    if st.button("← 後台"):
+        st.session_state.page = "admin"
+        st.session_state.admin_reply_sid = None
+        st.rerun()
 
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
 <div class="chat-hdr-title">{sess['customer_name']} · {category}</div>
-<div class="chat-hdr-sub">編號：{sid} · {sess['preference']} · 建立：{sess['created_at']}</div>
+<div class="chat-hdr-sub">編號：{sid} · {sess.get('preference', '')} · 建立：{fmt_time(sess['created_at'])}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
@@ -605,26 +553,26 @@ def show_admin_reply():
 
     messages = get_messages(sid)
     if not messages:
-        st.markdown('<div class="info-box">此顧客尚未提問。</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-box">此來訪者尚未提問。</div>', unsafe_allow_html=True)
     else:
         for msg in messages:
             if msg["role"] == "customer":
                 with st.chat_message("user", avatar="🙏"):
                     st.markdown(f"**{sess['customer_name']}**：{msg['content']}")
-                    st.caption(msg["created_at"])
+                    st.caption(fmt_time(msg["created_at"]))
             else:
                 with st.chat_message("assistant", avatar="☯"):
                     st.markdown(f"**【顧問解讀】**\n\n{msg['content']}")
-                    st.caption(msg["created_at"])
+                    st.caption(fmt_time(msg["created_at"]))
 
     st.markdown("---")
-    st.markdown("### ✍ 輸入解讀回覆")
+    st.markdown("### ✍ 卜卦解讀回覆")
 
     reply = st.text_area(
         "解讀內容",
-        placeholder="在此輸入您的易經解讀⋯⋯",
+        placeholder="在此輸入您的易經卜卦解讀⋯⋯",
         height=180,
-        key=f"admin_reply_txt_{st.session_state.reply_ver}",
+        key=f"reply_txt_{st.session_state.reply_ver}",
         label_visibility="collapsed",
     )
     r1, r2, r3 = st.columns(3)
