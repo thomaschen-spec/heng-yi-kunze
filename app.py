@@ -205,7 +205,7 @@ def fmt_time(ts):
 def _enrich(sessions):
     result = []
     for s in sessions:
-        msgs = sorted(s.get("messages", []), key=lambda m: m.get("created_at") or "")
+        msgs = sorted(s.get("messages") or [], key=lambda m: m.get("created_at") or "")
         last = msgs[-1] if msgs else None
         result.append({
             **s,
@@ -420,7 +420,7 @@ def init_state():
             st.session_state["_clear_storage"] = True
         else:
             st.session_state.customer_sid = sid
-            st.session_state.customer_name = sess["customer_name"]
+            st.session_state.customer_name = sess["customer_name"] or ""
             st.session_state.customer_category = sess.get("category", "")
             st.session_state.page = "chat"
 
@@ -460,6 +460,7 @@ with st.sidebar:
             for _k in list(st.session_state.keys()):
                 if _k.startswith("_del_arch_confirm_"):
                     st.session_state.pop(_k, None)
+            st.session_state.pop("admin_pw", None)
             st.session_state.admin_mode = False
             st.session_state.page = "home"
             st.rerun()
@@ -469,14 +470,14 @@ with st.sidebar:
             new_pw  = st.text_input("新密碼",   type="password", key="chpw_new")
             new_pw2 = st.text_input("確認新密碼", type="password", key="chpw_new2")
             if st.button("確認更改", use_container_width=True, key="chpw_btn"):
-                if not old_pw or not new_pw:
+                if not old_pw or not new_pw or not new_pw2:
                     st.error("請填寫所有欄位")
-                elif old_pw != get_admin_password():
-                    st.error("目前密碼錯誤")
-                elif new_pw != new_pw2:
-                    st.error("兩次新密碼不一致")
                 elif len(new_pw) < 6:
                     st.error("新密碼至少 6 個字元")
+                elif new_pw != new_pw2:
+                    st.error("兩次新密碼不一致")
+                elif old_pw != get_admin_password():
+                    st.error("目前密碼錯誤")
                 else:
                     if set_admin_password(new_pw):
                         st.success("密碼已更新")
@@ -620,7 +621,7 @@ if (sid) {
                 elif sess:
                     found_sid = sess["session_id"]
                     st.session_state.customer_sid = found_sid
-                    st.session_state.customer_name = sess["customer_name"]
+                    st.session_state.customer_name = sess["customer_name"] or ""
                     st.session_state.customer_category = sess.get("category", "")
                     st.session_state.page = "chat"
                     _components.html(f"""<script>
@@ -880,7 +881,7 @@ def show_admin():
         cat_icon = CATEGORIES.get(s["category"], {}).get("icon", "☯")
         preview = s["last_msg"] or "（尚未提問）"
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
-        name_esc = _html.escape(s["customer_name"])
+        name_esc = _html.escape(s["customer_name"] or "（未知）")
         preview_esc = _html.escape(preview)
 
         ci, cb = st.columns([4, 1])
@@ -937,7 +938,7 @@ def show_admin_reply():
         st.session_state.admin_reply_sid = None
         st.rerun()
 
-    cname_esc = _html.escape(sess["customer_name"])
+    cname_esc = _html.escape(sess["customer_name"] or "（未知）")
     pref = sess.get("preference", "") or ""
     pref_trunc = pref[:40] + ("…" if len(pref) > 40 else "")
     pref_esc = _html.escape(pref_trunc)
@@ -964,7 +965,7 @@ def show_admin_reply():
         for msg in messages:
             if msg["role"] == "customer":
                 with st.chat_message("user", avatar="🙏"):
-                    st.markdown(f"**{sess['customer_name']}**：{msg['content']}")
+                    st.markdown(f"**{sess['customer_name'] or '（未知）'}**：{msg['content']}")
                     st.caption(fmt_time(msg["created_at"]))
             else:
                 with st.chat_message("assistant", avatar="☯"):
@@ -1079,7 +1080,7 @@ def show_admin_archive():
         cat_icon = CATEGORIES.get(s["category"], {}).get("icon", "☯")
         preview = s["last_msg"] or "（無訊息）"
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
-        name_esc = _html.escape(s["customer_name"])
+        name_esc = _html.escape(s["customer_name"] or "（未知）")
         preview_esc = _html.escape(preview)
 
         ci, cb1, cb2 = st.columns([4, 1, 1])
@@ -1113,7 +1114,7 @@ def show_admin_archive():
 
         arch_sid = s["session_id"]
         if st.session_state.get(f"_del_arch_confirm_{arch_sid}"):
-            st.error(f"⚠️ 確定刪除「{_html.escape(s['customer_name'])}」的歸檔記錄？此操作無法復原。")
+            st.error(f"⚠️ 確定刪除「{_html.escape(s['customer_name'] or '（未知）')}」的歸檔記錄？此操作無法復原。")
             ca1, ca2, _ = st.columns([1, 1, 2])
             with ca1:
                 if st.button("✅ 確認", key=f"_del_arch_yes_{arch_sid}"):
