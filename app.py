@@ -777,7 +777,7 @@ def show_chat():
     user_q = st.chat_input("繼續提問⋯⋯")
     if user_q:
         if add_message(sid, "customer", user_q):
-            send_notification(sess["customer_name"], sess["category"], user_q, sid, is_followup=True)
+            send_notification(sess["customer_name"] or "", sess["category"], user_q, sid, is_followup=True)
             st.rerun()
         # else: error shown by add_message(); user can retry without losing their text
 
@@ -1117,6 +1117,9 @@ def show_admin_archive():
         with cb2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🗑️ 刪除", key=f"del_arch_{s['session_id']}", use_container_width=True):
+                for _k in list(st.session_state.keys()):
+                    if _k.startswith("_del_arch_confirm_"):
+                        st.session_state.pop(_k, None)
                 st.session_state[f"_del_arch_confirm_{s['session_id']}"] = True
                 st.rerun()
 
