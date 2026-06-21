@@ -916,8 +916,16 @@ def show_admin_reply():
     sess = get_session(sid)
     if sess is _DB_ERROR:
         st.error("⚠️ 資料庫暫時無法連線，請稍後重試。")
-        if st.button("🔄 重新整理", key="_admin_retry"):
-            st.rerun()
+        _ec1, _ec2 = st.columns(2)
+        with _ec1:
+            if st.button("🔄 重新整理", key="_admin_retry"):
+                st.rerun()
+        with _ec2:
+            _back_pg = st.session_state.get("_admin_reply_from", "admin")
+            if st.button("← 返回", key="_admin_retry_back"):
+                st.session_state.page = _back_pg
+                st.session_state.admin_reply_sid = None
+                st.rerun()
         return
     if sess is None:
         st.error("找不到此問卦記錄。")
@@ -1001,7 +1009,7 @@ def show_admin_reply():
         "解讀內容",
         placeholder="在此輸入您的易經卜卦解讀⋯⋯",
         height=180,
-        key=f"reply_txt_{st.session_state.reply_ver}",
+        key=f"reply_txt_{sid}_{st.session_state.reply_ver}",
         label_visibility="collapsed",
     )
     r1, r2, r3, r4 = st.columns(4)
