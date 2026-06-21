@@ -453,6 +453,9 @@ with st.sidebar:
             _cur = st.session_state.admin_reply_sid
             if _cur:
                 st.session_state.pop(f"_del_confirm_{_cur}", None)
+            for _k in list(st.session_state.keys()):
+                if _k.startswith("_del_arch_confirm_"):
+                    st.session_state.pop(_k, None)
             st.session_state.admin_mode = False
             st.session_state.page = "home"
             st.rerun()
@@ -704,6 +707,13 @@ def show_chat():
         return
     if sess is None:
         st.error("找不到此諮詢記錄。")
+        if st.button("← 返回首頁", key="_chat_back_notfound"):
+            st.session_state.page = "home"
+            st.session_state.customer_sid = None
+            st.session_state.customer_category = ""
+            st.session_state["_clear_storage_quiet"] = True
+            st.query_params.clear()
+            st.rerun()
         return
 
     category = sess["category"]
@@ -903,6 +913,10 @@ def show_admin_reply():
         return
     if sess is None:
         st.error("找不到此問卦記錄。")
+        if st.button("← 返回", key="_admin_reply_back_notfound"):
+            st.session_state.page = st.session_state.get("_admin_reply_from", "admin")
+            st.session_state.admin_reply_sid = None
+            st.rerun()
         return
 
     category = sess["category"]
@@ -1059,6 +1073,9 @@ def show_admin_archive():
         with cb1:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("查看", key=f"view_arch_{s['session_id']}", use_container_width=True):
+                for _k in list(st.session_state.keys()):
+                    if _k.startswith("_del_arch_confirm_"):
+                        st.session_state.pop(_k, None)
                 st.session_state.admin_reply_sid = s["session_id"]
                 st.session_state._admin_reply_from = "admin_archive"
                 st.session_state.page = "admin_reply"
