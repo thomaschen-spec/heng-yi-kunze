@@ -309,12 +309,14 @@ def close_session(sid: str) -> bool:
         st.error(f"結案失敗：{e}")
         return False
 
-def delete_session(sid: str):
+def delete_session(sid: str) -> bool:
     try:
         _delete("messages", {"session_id": f"eq.{sid}"})
         _delete("sessions", {"session_id": f"eq.{sid}"})
+        return True
     except Exception as e:
         st.error(f"刪除失敗：{e}")
+        return False
 
 def get_admin_password() -> str:
     try:
@@ -847,7 +849,7 @@ def show_admin():
         return
 
     if search:
-        sessions = [s for s in sessions if search.lower() in s["customer_name"].lower()]
+        sessions = [s for s in sessions if search.lower() in (s["customer_name"] or "").lower()]
     if sort_mode == "姓氏分組":
         sessions = sorted(sessions, key=lambda s: s["customer_name"])
 
@@ -969,10 +971,10 @@ def show_admin_reply():
     if sess["is_closed"]:
         st.info("🗄️ 此問卦已歸檔。")
         if st.button("🗑️ 刪除此記錄", use_container_width=True, key="del_closed"):
-            delete_session(sid)
-            st.session_state.page = "admin_archive"
-            st.session_state.admin_reply_sid = None
-            st.rerun()
+            if delete_session(sid):
+                st.session_state.page = "admin_archive"
+                st.session_state.admin_reply_sid = None
+                st.rerun()
         return
 
     st.markdown("### ✍ 卜卦解讀回覆")
@@ -1016,11 +1018,12 @@ def show_admin_reply():
         cd1, cd2, _ = st.columns([1, 1, 2])
         with cd1:
             if st.button("✅ 確認刪除", key=f"_del_yes_{sid}"):
-                delete_session(sid)
-                st.session_state.pop(f"_del_confirm_{sid}", None)
-                st.session_state.page = "admin"
-                st.session_state.admin_reply_sid = None
-                st.rerun()
+                if delete_session(sid):
+                    st.session_state.pop(f"_del_confirm_{sid}", None)
+                    st.session_state.page = "admin"
+                    st.session_state.admin_reply_sid = None
+                    st.rerun()
+                # else: error shown by delete_session(), keep confirm dialog open
         with cd2:
             if st.button("❌ 取消", key=f"_del_no_{sid}"):
                 st.session_state.pop(f"_del_confirm_{sid}", None)
@@ -1097,9 +1100,10 @@ def show_admin_archive():
             ca1, ca2, _ = st.columns([1, 1, 2])
             with ca1:
                 if st.button("✅ 確認", key=f"_del_arch_yes_{arch_sid}"):
-                    delete_session(arch_sid)
-                    st.session_state.pop(f"_del_arch_confirm_{arch_sid}", None)
-                    st.rerun()
+                    if delete_session(arch_sid):
+                        st.session_state.pop(f"_del_arch_confirm_{arch_sid}", None)
+                        st.rerun()
+                    # else: error shown, keep dialog open so admin can retry
             with ca2:
                 if st.button("❌ 取消", key=f"_del_arch_no_{arch_sid}"):
                     st.session_state.pop(f"_del_arch_confirm_{arch_sid}", None)
