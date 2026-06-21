@@ -6,6 +6,7 @@ const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const LINE_SECRET = Deno.env.get("LINE_CHANNEL_SECRET")!;
 const LINE_TOKEN = Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN")!;
 const ADMIN_USER_ID = Deno.env.get("LINE_ADMIN_USER_ID")!;
+const APP_URL = Deno.env.get("APP_URL") ?? "https://heng-yi-kunze.streamlit.app";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -37,6 +38,27 @@ async function pushLine(text: string) {
     }),
   });
 }
+
+async function replyLine(replyToken: string, text: string) {
+  await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${LINE_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: "text", text }],
+    }),
+  });
+}
+
+const VISITOR_REPLY = `您好！歡迎來到洞察易生的經歷 🌿
+
+如需易經諮詢，請前往網頁填寫問題：
+${APP_URL}
+
+📱 填寫姓名與問題後，小老師會為您解卦回覆。`;
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -170,7 +192,12 @@ serve(async (req) => {
 
   for (const evt of events) {
     if (evt.type !== "message" || evt.message?.type !== "text") continue;
-    if (evt.source?.userId !== ADMIN_USER_ID) continue;
+
+    // Non-admin visitor → auto-reply with web URL
+    if (evt.source?.userId !== ADMIN_USER_ID) {
+      if (evt.replyToken) await replyLine(evt.replyToken, VISITOR_REPLY);
+      continue;
+    }
 
     const text = (evt.message.text as string).trim();
     let reply = "";
