@@ -284,7 +284,7 @@ def get_all_sessions(cat_f=None, status_f=None):
         return rows
     except Exception as e:
         st.error(f"⚠️ 載入問卦記錄失敗：{e}")
-        return []
+        return None  # None = DB error, [] = genuinely empty
 
 def get_archived_sessions():
     try:
@@ -296,16 +296,18 @@ def get_archived_sessions():
         return _enrich(_get("sessions", params))
     except Exception as e:
         st.error(f"⚠️ 載入歸檔記錄失敗：{e}")
-        return []
+        return None  # None = DB error, [] = genuinely empty
 
-def close_session(sid: str):
+def close_session(sid: str) -> bool:
     try:
         _patch("sessions", {
             "is_closed": True,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }, {"session_id": f"eq.{sid}"})
+        return True
     except Exception as e:
         st.error(f"結案失敗：{e}")
+        return False
 
 def delete_session(sid: str):
     try:
@@ -828,6 +830,11 @@ def show_admin():
             st.session_state.page = "admin_archive"
             st.rerun()
 
+    if sessions is None:
+        if st.button("🔄 重新整理", key="_admin_sessions_retry"):
+            st.rerun()
+        return
+
     if search:
         sessions = [s for s in sessions if search.lower() in s["customer_name"].lower()]
     if sort_mode == "姓氏分組":
@@ -974,11 +981,12 @@ def show_admin_reply():
             st.rerun()
     with r3:
         if st.button("✅ 結案歸檔", use_container_width=True):
-            close_session(sid)
-            st.session_state.pop(f"_del_confirm_{sid}", None)
-            st.session_state.page = "admin"
-            st.session_state.admin_reply_sid = None
-            st.rerun()
+            if close_session(sid):
+                st.session_state.pop(f"_del_confirm_{sid}", None)
+                st.session_state.page = "admin"
+                st.session_state.admin_reply_sid = None
+                st.rerun()
+            # else: error shown by close_session(), stay on page
     with r4:
         if st.button("🗑️ 刪除問卦", use_container_width=True):
             st.session_state[f"_del_confirm_{sid}"] = True
@@ -1017,6 +1025,11 @@ def show_admin_archive():
 </div>""", unsafe_allow_html=True)
 
     sessions = get_archived_sessions()
+    if sessions is None:
+        if st.button("🔄 重新整理", key="_arch_sessions_retry"):
+            st.rerun()
+        return
+
     st.markdown(f"**共 {len(sessions)} 筆歸檔**")
 
     if not sessions:
