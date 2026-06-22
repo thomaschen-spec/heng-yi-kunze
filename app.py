@@ -357,8 +357,13 @@ def get_announcement() -> str:
 
 def set_announcement(text: str) -> bool:
     try:
-        _post("settings", {"key": "announcement", "value": text},
-              {"Prefer": "resolution=merge-duplicates,return=minimal"})
+        r = _req.post(
+            f"{_base()}/settings",
+            headers=_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+            json={"key": "announcement", "value": text},
+            timeout=10,
+        )
+        r.raise_for_status()
         return True
     except Exception as e:
         st.error(f"儲存失敗：{e}")
