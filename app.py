@@ -3,6 +3,7 @@ import streamlit.components.v1 as _components
 import uuid
 import time
 import random
+import re
 import requests as _req
 import html as _html
 from datetime import datetime, timezone, timedelta
@@ -24,6 +25,13 @@ _LIFF_ID = st.secrets.get("liff_id", "")  # LINE LIFF App ID; 空字串時整段
 _APP_URL = st.secrets.get("app_url", "https://heng-yi-kunze.streamlit.app").rstrip("/")
 def _email_enabled() -> bool:
     return bool(st.secrets.get("brevo_api_key", "") and st.secrets.get("email_from", ""))
+
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+def _valid_email(s: str) -> bool:
+    """嚴格驗證 email：擋掉引號/空白/角括號等可被注入 JS 字串或 HTML 的字元。
+    email 之後會被插進 localStorage JS 字面量與通知信連結，必須先在源頭把關。"""
+    return bool(_EMAIL_RE.match((s or "").strip()))
 
 CATEGORIES = {
     "感情與人際": {
@@ -621,8 +629,8 @@ def init_state():
         st.query_params.clear()
 
     # Email 自動回登：localStorage 存了已驗證 email 時，前端 JS 會帶上 ?email=
-    if "email" in params and not st.session_state.email:
-        em = params["email"]
+    if "email" in params and not st.session_state.email and _valid_email(params["email"]):
+        em = params["email"].strip().lower()
         st.session_state.email = em
         if st.session_state.customer_sid is None:
             esess = get_open_session_by_email(em)
@@ -905,7 +913,7 @@ localStorage.removeItem('iching_sid');
             with ec1:
                 if st.button("寄送驗證碼", use_container_width=True, key="email_send_code"):
                     em = (em_in or "").strip().lower()
-                    if "@" not in em or "." not in em.split("@")[-1]:
+                    if not _valid_email(em):
                         st.error("請輸入正確的 Email")
                     else:
                         code = _gen_code()
