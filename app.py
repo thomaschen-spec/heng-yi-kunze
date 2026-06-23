@@ -1,6 +1,8 @@
 import streamlit as st
 import streamlit.components.v1 as _components
 import uuid
+import time
+import random
 import requests as _req
 import html as _html
 from datetime import datetime, timezone, timedelta
@@ -19,6 +21,9 @@ st.set_page_config(
 # ── Constants ─────────────────────────────────────────────────────────────────
 _FALLBACK_PW = st.secrets.get("admin_password", "kunze2024")
 _LIFF_ID = st.secrets.get("liff_id", "")  # LINE LIFF App ID; 空字串時整段 LIFF 功能停用
+_APP_URL = st.secrets.get("app_url", "https://heng-yi-kunze.streamlit.app").rstrip("/")
+def _email_enabled() -> bool:
+    return bool(st.secrets.get("brevo_api_key", "") and st.secrets.get("email_from", ""))
 
 CATEGORIES = {
     "感情與人際": {
@@ -216,25 +221,27 @@ def _enrich(sessions):
         })
     return result
 
-def create_session(name: str, category: str, phone: str = "", line_uid: str = ""):
+def create_session(name: str, category: str, phone: str = "", line_uid: str = "", email: str = ""):
     sid = str(uuid.uuid4())[:8].upper()
-    payload = {
+    base = {
         "session_id": sid,
         "customer_name": name,
         "category": category,
         "preference": phone.lower(),
     }
+    extra = {}
     if line_uid:
-        payload["line_uid"] = line_uid
+        extra["line_uid"] = line_uid
+    if email:
+        extra["email"] = email.lower()
     try:
-        _post("sessions", payload)
+        _post("sessions", {**base, **extra})
         return sid
     except Exception as e:
-        # line_uid 欄位若尚未建立（migration 未跑），去掉它再試一次，確保問卦仍可送出
-        if line_uid:
+        # line_uid / email 欄位若尚未建立（migration 未跑），去掉選填欄位再試，確保問卦仍可送出
+        if extra:
             try:
-                payload.pop("line_uid", None)
-                _post("sessions", payload)
+                _post("sessions", base)
                 return sid
             except Exception as e2:
                 st.error(f"建立諮詢失敗：{e2}")
@@ -249,6 +256,21 @@ def get_open_session_by_line_uid(uid: str):
     try:
         data = _get("sessions", {
             "line_uid": f"eq.{uid}",
+            "is_closed": "eq.false",
+            "order": "updated_at.desc",
+            "limit": "1",
+        })
+        return data[0] if data else None
+    except Exception:
+        return None  # 欄位不存在或 DB 異常 → 不自動登入，不報錯
+
+def get_open_session_by_email(email: str):
+    """Email 登入：找此 email 最新一筆未結案問卦。"""
+    if not email:
+        return None
+    try:
+        data = _get("sessions", {
+            "email": f"eq.{email.lower()}",
             "is_closed": "eq.false",
             "order": "updated_at.desc",
             "limit": "1",
@@ -472,6 +494,64 @@ def send_notification(name: str, category: str, question: str, sid: str, is_foll
     set_setting("last_notify_error", f"{_ts} {('追加提問' if is_followup else '新問卦')} 推播失敗 {last_err}{_hint}")
     return False
 
+def _gen_code() -> str:
+    return f"{random.randint(0, 999999):06d}"
+
+def send_email(to_addr: str, subject: str, html: str) -> bool:
+    """透過 Brevo HTTP API 寄信（不需自有網域，驗證單一寄件 email 即可）。
+    未設定 brevo_api_key / email_from 時直接停用，不報錯。"""
+    key    = st.secrets.get("brevo_api_key", "")
+    sender = st.secrets.get("email_from", "")
+    if not key or not sender or not to_addr:
+        return False
+    try:
+        r = _req.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": key, "Content-Type": "application/json", "accept": "application/json"},
+            json={
+                "sender": {"name": "洞察易生的經歷", "email": sender},
+                "to": [{"email": to_addr}],
+                "subject": subject,
+                "htmlContent": html,
+            },
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            return True
+        print(f"[send_email] Brevo failed {r.status_code}: {r.text[:200]}")
+        return False
+    except Exception as e:
+        print(f"[send_email] exception: {e}")
+        return False
+
+def notify_customer_reply_email(sid: str) -> None:
+    """小老師發送解讀後，若該問卦留有 email，寄信通知顧客回網頁查看。
+    未設定寄信 / 無 email / 寄送失敗都靜默略過，絕不影響回覆流程。"""
+    if not _email_enabled():
+        return
+    try:
+        sess = get_session(sid)
+    except Exception:
+        return
+    if not sess or sess is _DB_ERROR:
+        return
+    to_addr = (sess.get("email") or "").strip()
+    if not to_addr:
+        return
+    name = _html.escape(sess.get("customer_name") or "您")
+    link = f"{_APP_URL}/?email={to_addr}"
+    send_email(
+        to_addr,
+        "小老師回覆了您的問卦 · 洞察易生的經歷",
+        f"<p>{name} 您好，</p>"
+        f"<p>小老師已經為您的問卦寫下解讀，請點選下方連結回到網頁查看：</p>"
+        f"<p><a href='{link}' style='display:inline-block;padding:10px 20px;"
+        f"background:#8B6914;color:#fff;text-decoration:none;border-radius:6px;'>"
+        f"查看小老師的解讀</a></p>"
+        f"<p style='color:#999;font-size:0.85rem;'>此信由系統自動寄出，"
+        f"開啟連結即可免密碼登入。洞察易生的經歷</p>",
+    )
+
 # ── Session State Init ────────────────────────────────────────────────────────
 def init_state():
     defaults = {
@@ -485,6 +565,7 @@ def init_state():
         "customer_category": "",
         "line_uid": "",                 # 透過 LIFF 取得的 LINE userId（免密碼登入用）
         "line_name": "",                # 透過 LIFF 取得的 LINE 顯示名稱（預填姓名用）
+        "email": "",                    # 已驗證的顧客 email（登入與回覆通知用）
         "selected_cat": None,
         "reply_ver": 0,
         "admin_name_search": "",
@@ -537,6 +618,19 @@ def init_state():
                 st.session_state.customer_category = lsess.get("category", "")
                 st.session_state.page = "chat"
         # 消化掉 query string，避免重新整理時重複觸發（line_uid 已存入 session_state）
+        st.query_params.clear()
+
+    # Email 自動回登：localStorage 存了已驗證 email 時，前端 JS 會帶上 ?email=
+    if "email" in params and not st.session_state.email:
+        em = params["email"]
+        st.session_state.email = em
+        if st.session_state.customer_sid is None:
+            esess = get_open_session_by_email(em)
+            if esess:
+                st.session_state.customer_sid = esess["session_id"]
+                st.session_state.customer_name = esess["customer_name"] or ""
+                st.session_state.customer_category = esess.get("category", "")
+                st.session_state.page = "chat"
         st.query_params.clear()
 
 init_state()
@@ -729,14 +823,12 @@ localStorage.removeItem('iching_sid');
 (function(){{
   var pwin = window.parent, pdoc = window.parent.document;
   function sidRedirect(){{
+    var url = new URL(pwin.location.href);
+    if (url.searchParams.get('sid') || url.searchParams.get('email')) return;
     var sid = pwin.localStorage.getItem('iching_sid');
-    if (sid) {{
-      var url = new URL(pwin.location.href);
-      if (!url.searchParams.get('sid')) {{
-        url.searchParams.set('sid', sid);
-        pwin.location.href = url.toString();
-      }}
-    }}
+    if (sid) {{ url.searchParams.set('sid', sid); pwin.location.href = url.toString(); return; }}
+    var em = pwin.localStorage.getItem('iching_email');
+    if (em) {{ url.searchParams.set('email', em); pwin.location.href = url.toString(); }}
   }}
   if (pwin.__iching_liff_started) return;
   pwin.__iching_liff_started = true;
@@ -764,14 +856,14 @@ localStorage.removeItem('iching_sid');
 </script>""", height=0)
         else:
             _components.html("""<script>
-const sid = localStorage.getItem('iching_sid');
-if (sid) {
-    const url = new URL(window.parent.location.href);
-    if (!url.searchParams.get('sid')) {
-        url.searchParams.set('sid', sid);
-        window.parent.location.href = url.toString();
-    }
-}
+(function(){
+  const url = new URL(window.parent.location.href);
+  if (url.searchParams.get('sid') || url.searchParams.get('email')) return;
+  const sid = localStorage.getItem('iching_sid');
+  if (sid) { url.searchParams.set('sid', sid); window.parent.location.href = url.toString(); return; }
+  const em = localStorage.getItem('iching_email');
+  if (em) { url.searchParams.set('email', em); window.parent.location.href = url.toString(); }
+})();
 </script>""", height=0)
     st.markdown('<div class="main-title">洞察易生的經歷</div>', unsafe_allow_html=True)
     st.markdown(
@@ -804,6 +896,71 @@ if (sid) {
 　例如：「我與某人的感情走向如何？」、「這份工作適合我嗎？」<br><br>
 　選擇分區後填寫姓名與問題，靜候小老師為您解卦。
 </div>""", unsafe_allow_html=True)
+
+    if _email_enabled():
+        with st.expander("📧 用 Email 登入 / 查詢（免記密碼，推薦）", expanded=False):
+            em_in = st.text_input("您的 Email", key="email_login_addr",
+                                  placeholder="your@email.com", label_visibility="collapsed")
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                if st.button("寄送驗證碼", use_container_width=True, key="email_send_code"):
+                    em = (em_in or "").strip().lower()
+                    if "@" not in em or "." not in em.split("@")[-1]:
+                        st.error("請輸入正確的 Email")
+                    else:
+                        code = _gen_code()
+                        st.session_state["_email_code"] = code
+                        st.session_state["_email_code_addr"] = em
+                        st.session_state["_email_code_exp"] = time.time() + 600
+                        ok = send_email(
+                            em, "您的登入驗證碼 · 洞察易生的經歷",
+                            f"<p>您好，</p><p>您的登入驗證碼是：</p>"
+                            f"<p style='font-size:1.8rem;font-weight:700;letter-spacing:0.2em;color:#8B6914;'>{code}</p>"
+                            f"<p>請於 10 分鐘內回到網頁輸入。若非您本人操作，請忽略此信。</p>"
+                            f"<p style='color:#999;font-size:0.85rem;'>洞察易生的經歷</p>",
+                        )
+                        if ok:
+                            st.session_state["_email_code_sent"] = True
+                            st.success("驗證碼已寄出，請查看信箱（含垃圾信匣）。")
+                        else:
+                            st.error("寄送失敗，請稍後再試，或改用下方查詢密碼。")
+            with ec2:
+                if st.session_state.get("_email_code_sent"):
+                    if st.button("重新寄送", use_container_width=True, key="email_resend"):
+                        st.session_state["_email_code_sent"] = False
+                        st.rerun()
+            if st.session_state.get("_email_code_sent"):
+                code_in = st.text_input("輸入 6 位數驗證碼", key="email_code_in",
+                                        max_chars=6, placeholder="000000")
+                if st.button("驗證登入", use_container_width=True, key="email_verify"):
+                    if time.time() > st.session_state.get("_email_code_exp", 0):
+                        st.error("驗證碼已過期，請重新寄送。")
+                    elif (code_in or "").strip() != st.session_state.get("_email_code", "_"):
+                        st.error("驗證碼錯誤，請再確認。")
+                    else:
+                        em = st.session_state.get("_email_code_addr", "")
+                        st.session_state.email = em
+                        for _k in ("_email_code", "_email_code_addr", "_email_code_exp", "_email_code_sent"):
+                            st.session_state.pop(_k, None)
+                        esess = get_open_session_by_email(em)
+                        if esess:
+                            fsid = esess["session_id"]
+                            st.session_state.customer_sid = fsid
+                            st.session_state.customer_name = esess["customer_name"] or ""
+                            st.session_state.customer_category = esess.get("category", "")
+                            st.session_state.page = "chat"
+                            _components.html(f"""<script>
+localStorage.setItem('iching_email', '{em}');
+localStorage.setItem('iching_sid', '{fsid}');
+window.parent.location.href = '?sid={fsid}';
+</script>""", height=0)
+                            st.stop()
+                        else:
+                            _components.html(f"""<script>
+localStorage.setItem('iching_email', '{em}');
+</script>""", height=0)
+                            st.success("✅ 登入成功！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
+            st.caption("輸入 Email 收驗證碼即可登入，日後回來免再輸入；小老師回覆時也會寄信通知您。")
 
     with st.expander("📱 查詢我的諮詢記錄"):
         lookup_phone = st.text_input("輸入當時設定的查詢密碼", placeholder="您設定的查詢密碼", label_visibility="collapsed")
@@ -867,8 +1024,11 @@ def show_register():
     st.markdown(f'<div class="info-box">{info["welcome"]}</div>', unsafe_allow_html=True)
 
     _via_line = bool(st.session_state.line_uid)
+    _via_email = bool(st.session_state.email)
     if _via_line:
         st.caption("✅ 您已透過 LINE 登入，日後可直接從 LINE 選單回來查看回覆，免輸入密碼。")
+    elif _via_email:
+        st.caption(f"✅ 您已用 Email（{st.session_state.email}）登入，小老師回覆時會寄信通知您，日後回來免再輸入。")
 
     with st.form("register_form"):
         name = st.text_input("您的姓名", value=st.session_state.line_name or "",
@@ -893,7 +1053,8 @@ def show_register():
             st.error("請填寫問題")
         else:
             sid = create_session(name.strip(), cat_name, phone.strip(),
-                                 line_uid=st.session_state.line_uid)
+                                 line_uid=st.session_state.line_uid,
+                                 email=st.session_state.email)
             if not sid:
                 return
             if not add_message(sid, "customer", question.strip()):
@@ -1286,6 +1447,7 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
         if st.button("📤 發送解讀", use_container_width=True):
             if reply.strip():
                 if add_message(sid, "consultant", reply.strip()):
+                    notify_customer_reply_email(sid)
                     st.session_state["_clear_reply_draft"] = sid
                     st.session_state.reply_ver += 1
                     st.rerun()
