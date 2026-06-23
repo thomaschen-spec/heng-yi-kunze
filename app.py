@@ -10,6 +10,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
+from urllib.parse import quote
 from datetime import datetime, timezone, timedelta
 from streamlit_autorefresh import st_autorefresh
 
@@ -546,7 +547,7 @@ def notify_customer_reply_email(sid: str) -> None:
     if not to_addr:
         return
     name = _html.escape(sess.get("customer_name") or "您")
-    link = f"{_APP_URL}/?email={to_addr}"
+    link = f"{_APP_URL}/?email={quote(to_addr)}"  # quote：plus 地址的 + 不會被解成空格，回登連結才不會失效
     send_email(
         to_addr,
         "小老師回覆了您的問卦 · 洞察易生的經歷",
@@ -919,7 +920,6 @@ localStorage.removeItem('iching_sid');
                     elif _wait > 0:
                         st.warning(f"剛剛已寄出，請於 {int(_wait) + 1} 秒後再重新寄送，避免重複收信。")
                     else:
-                        st.session_state["_email_last_send"] = _now
                         code = _gen_code()
                         st.session_state["_email_code"] = code
                         st.session_state["_email_code_addr"] = em
@@ -932,6 +932,7 @@ localStorage.removeItem('iching_sid');
                             f"<p style='color:#999;font-size:0.85rem;'>洞察易生的經歷</p>",
                         )
                         if ok:
+                            st.session_state["_email_last_send"] = _now  # 只在真的寄出後才起算冷卻；失敗可立即重試
                             st.session_state["_email_code_sent"] = True
                             st.success("驗證碼已寄出，請查看信箱（含垃圾信匣）。")
                         else:
@@ -1363,12 +1364,16 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
     pref_trunc = pref[:40] + ("…" if len(pref) > 40 else "")
     pref_esc = _html.escape(pref_trunc)
     pref_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{pref_esc}</span>' if pref else '<span style="color:#B8A070;font-style:italic;">（未設定）</span>'
+    email_val = (sess.get("email") or "").strip()
+    email_esc = _html.escape(email_val)
+    email_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{email_esc}</span>' if email_val else '<span style="color:#B8A070;font-style:italic;">（未提供，此顧客非 Email 登入）</span>'
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
 <div class="chat-hdr-title">{cname_esc} · {category}</div>
 <div class="chat-hdr-sub">編號：{sid} · 建立：{fmt_time(sess['created_at'])}</div>
 <div class="chat-hdr-sub" style="margin-top:4px;">🔑 查詢密碼：{pref_display}</div>
+<div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
