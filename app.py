@@ -912,9 +912,14 @@ localStorage.removeItem('iching_sid');
             with ec1:
                 if st.button("寄送驗證碼", use_container_width=True, key="email_send_code"):
                     em = (em_in or "").strip().lower()
+                    _now = time.time()
+                    _wait = 10 - (_now - st.session_state.get("_email_last_send", 0))  # 兩封間隔至少 10 秒，擋網路延遲下的重複點擊
                     if not _valid_email(em):
                         st.error("請輸入正確的 Email")
+                    elif _wait > 0:
+                        st.warning(f"剛剛已寄出，請於 {int(_wait) + 1} 秒後再重新寄送，避免重複收信。")
                     else:
+                        st.session_state["_email_last_send"] = _now
                         code = _gen_code()
                         st.session_state["_email_code"] = code
                         st.session_state["_email_code_addr"] = em
