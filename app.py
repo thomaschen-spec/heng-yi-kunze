@@ -983,6 +983,14 @@ localStorage.setItem('iching_email', '{em}');
             f"gmail_app_password: {'✓' if _have_pw else '✗ 缺'}。兩個都要填好才會出現登入框。"
         )
 
+    # LIFF 診斷（驗收用）：網址加 ?debug=1 才顯示，顧客平常看不到。
+    # liff_id ✓ = 線上 Secrets 已吃到、LIFF 已啟用；在 LINE 內開啟若 line_uid 有值 = 免密碼自動登入成功。
+    if st.query_params.get("debug") == "1":
+        st.caption(
+            f"🔧 LIFF 診斷 — liff_id: {'✓ 已設定（LIFF 啟用）' if _LIFF_ID else '✗ 缺（LIFF 停用）'}、"
+            f"目前 line_uid: {st.session_state.line_uid or '（無 — 非 LINE 內開啟或尚未自動登入）'}。"
+        )
+
     with st.expander("📱 查詢我的諮詢記錄"):
         lookup_phone = st.text_input("輸入當時設定的查詢密碼", placeholder="您設定的查詢密碼", label_visibility="collapsed")
         if st.button("查詢記錄", use_container_width=True):
