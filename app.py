@@ -2,7 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as _components
 import uuid
 import time
-import random
+import hmac
+import secrets as _secrets
 import re
 import requests as _req
 import html as _html
@@ -32,9 +33,14 @@ def _email_enabled() -> bool:
     return bool(st.secrets.get("email_from", "") and st.secrets.get("gmail_app_password", ""))
 
 def _google_enabled() -> bool:
-    # secrets 有 [auth] 區塊（client_id/secret 等）才啟用 Google 登入；沒設定時整段停用、不影響現有登入。
+    # 只有 [auth] 區塊「同時」有 redirect_uri 與 cookie_secret 才啟用 Google 登入。
+    # 之前只檢查區塊存在 → 設定不全（缺 redirect_uri / cookie_secret）時按鈕照樣顯示，
+    # 但 OAuth callback 階段才 500（特別是 Safari/Mac 對 cookie 較嚴時）。寧可不顯示按鈕。
     try:
-        return bool(st.secrets.get("auth", None))
+        auth = st.secrets.get("auth", None)
+        if not auth:
+            return False
+        return bool(auth.get("redirect_uri") and auth.get("cookie_secret"))
     except Exception:
         return False
 
@@ -196,6 +202,14 @@ def _headers(extra=None):
 def _base():
     return st.secrets.get("supabase_url", "").rstrip("/") + "/rest/v1"
 
+def _eqv(value: str) -> str:
+    """把使用者輸入包成 PostgREST 的 eq 過濾值並加雙引號跳脫。
+    不跳脫時，值裡的逗號／括號／點會被 PostgREST 解析成額外的過濾運算子，
+    可被用來竄改查詢語意（例：preference=1,is_closed.eq.false）。"""
+    v = str(value)
+    v = v.replace("\\", "\\\\").replace('"', '\\"')
+    return f'eq."{v}"'
+
 def _get(table, params=None):
     r = _req.get(f"{_base()}/{table}", headers=_headers(), params=params, timeout=10)
     r.raise_for_status()
@@ -241,13 +255,13 @@ def _enrich(sessions):
         })
     return result
 
-def create_session(name: str, category: str, phone: str = "", line_uid: str = "", email: str = ""):
+def create_session(name: str, category: str, line_uid: str = "", email: str = ""):
     sid = str(uuid.uuid4())[:8].upper()
     base = {
         "session_id": sid,
         "customer_name": name,
         "category": category,
-        "preference": phone.lower(),
+        "preference": "",  # 查詢密碼功能已移除，改用 Email／Google／LINE 身分登入；此欄保留空字串相容舊資料表
     }
     extra = {}
     if line_uid:
@@ -275,7 +289,7 @@ def get_open_session_by_line_uid(uid: str):
         return None
     try:
         data = _get("sessions", {
-            "line_uid": f"eq.{uid}",
+            "line_uid": _eqv(uid),
             "is_closed": "eq.false",
             "order": "updated_at.desc",
             "limit": "1",
@@ -290,7 +304,7 @@ def get_open_session_by_email(email: str):
         return None
     try:
         data = _get("sessions", {
-            "email": f"eq.{email.lower()}",
+            "email": _eqv(email.lower()),
             "is_closed": "eq.false",
             "order": "updated_at.desc",
             "limit": "1",
@@ -316,35 +330,9 @@ def find_my_open_session():
 
 _DB_ERROR = object()  # sentinel: DB unreachable (distinct from "session not found")
 
-def get_session_by_phone(phone: str):
-    try:
-        data = _get("sessions", {
-            "preference": f"eq.{phone.lower()}",
-            "is_closed": "eq.false",
-            "order": "created_at.desc",
-            "limit": "1",
-        })
-        return data[0] if data else None
-    except Exception:
-        return _DB_ERROR
-
-def count_sessions_by_phone(phone: str) -> int:
-    """Count active sessions sharing this lookup password (for duplicate warning)."""
-    if not phone:
-        return 0
-    try:
-        data = _get("sessions", {
-            "select": "session_id",
-            "preference": f"eq.{phone.lower()}",
-            "is_closed": "eq.false",
-        })
-        return len(data) if data else 0
-    except Exception:
-        return 0
-
 def get_session(sid: str):
     try:
-        data = _get("sessions", {"session_id": f"eq.{sid}", "limit": "1"})
+        data = _get("sessions", {"session_id": _eqv(sid), "limit": "1"})
         return data[0] if data else None  # None = session genuinely not in DB
     except Exception:
         return _DB_ERROR  # connection/timeout error
@@ -353,7 +341,7 @@ def add_message(sid: str, role: str, content: str) -> bool:
     try:
         _post("messages", {"session_id": sid, "role": role, "content": content})
         _patch("sessions", {"updated_at": datetime.now(timezone.utc).isoformat()},
-               {"session_id": f"eq.{sid}"})
+               {"session_id": _eqv(sid)})
         return True
     except Exception as e:
         st.error(f"訊息儲存失敗：{e}")
@@ -361,7 +349,7 @@ def add_message(sid: str, role: str, content: str) -> bool:
 
 def get_messages(sid: str):
     try:
-        return _get("messages", {"session_id": f"eq.{sid}", "order": "created_at.asc"})
+        return _get("messages", {"session_id": _eqv(sid), "order": "created_at.asc"})
     except Exception as e:
         st.error(f"⚠️ 載入訊息失敗：{e}")
         return None  # None = DB error, [] = genuinely no messages
@@ -402,7 +390,7 @@ def close_session(sid: str) -> bool:
         _patch("sessions", {
             "is_closed": True,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-        }, {"session_id": f"eq.{sid}"})
+        }, {"session_id": _eqv(sid)})
         return True
     except Exception as e:
         st.error(f"結案失敗：{e}")
@@ -410,19 +398,21 @@ def close_session(sid: str) -> bool:
 
 def delete_session(sid: str) -> bool:
     try:
-        _delete("messages", {"session_id": f"eq.{sid}"})
-        _delete("sessions", {"session_id": f"eq.{sid}"})
+        _delete("messages", {"session_id": _eqv(sid)})
+        _delete("sessions", {"session_id": _eqv(sid)})
         return True
     except Exception as e:
         st.error(f"刪除失敗：{e}")
         return False
 
-def get_admin_password() -> str:
+def get_admin_password():
+    """回傳目前管理密碼。DB 連線異常時回 None（fail-closed），呼叫端須拒絕登入，
+    避免攻擊者短暫干擾 DB 就讓密碼關卡降回硬編碼預設值。沒有 config 列（首次啟用）才用預設。"""
     try:
         data = _get("config", {"key": "eq.admin_password", "limit": "1"})
-        return data[0]["value"] if data else _FALLBACK_PW
     except Exception:
-        return _FALLBACK_PW
+        return None  # DB 錯誤 → fail-closed，不可登入
+    return data[0]["value"] if data else _FALLBACK_PW
 
 def set_admin_password(new_pw: str) -> bool:
     try:
@@ -435,7 +425,7 @@ def set_admin_password(new_pw: str) -> bool:
 
 def get_announcement() -> str:
     try:
-        data = _get("settings", {"key": "eq.announcement", "select": "value"})
+        data = _get("settings", {"key": "eq.announcement", "select": "value", "limit": "1"})
         return (data[0].get("value") or "") if data else ""
     except Exception:
         return ""
@@ -456,7 +446,7 @@ def set_announcement(text: str) -> bool:
 
 def get_setting(key: str) -> str:
     try:
-        data = _get("settings", {"key": f"eq.{key}", "select": "value"})
+        data = _get("settings", {"key": _eqv(key), "select": "value", "limit": "1"})
         return (data[0].get("value") or "") if data else ""
     except Exception:
         return ""
@@ -530,7 +520,8 @@ def send_notification(name: str, category: str, question: str, sid: str, is_foll
     return False
 
 def _gen_code() -> str:
-    return f"{random.randint(0, 999999):06d}"
+    # 用 secrets（密碼學安全）而非 random，驗證碼才不可預測
+    return f"{_secrets.randbelow(1000000):06d}"
 
 def send_email(to_addr: str, subject: str, html: str) -> bool:
     """透過 Gmail SMTP 寄信（用寄件人自己的 Gmail + 應用程式密碼，免註冊第三方服務）。
@@ -582,6 +573,25 @@ def notify_customer_reply_email(sid: str) -> None:
         f"開啟連結即可免密碼登入。洞察易生的經歷</p>",
     )
 
+def notify_customer_reply_line(sess) -> None:
+    """顧客若是透過 LINE 登入（留有 line_uid），小老師回覆後推播通知到他的 LINE。
+    補上原本只寄 email、LINE 顧客收不到回覆通知的缺口。best-effort，失敗靜默、不影響回覆流程。"""
+    token = st.secrets.get("line_token", "")
+    uid = (sess.get("line_uid") or "").strip() if sess else ""
+    if not token or not uid:
+        return
+    cat = sess.get("category", "")
+    text = f"小老師回覆了您的問卦（{cat}），請回到網頁查看：\n{_APP_URL}"
+    try:
+        _req.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"to": uid, "messages": [{"type": "text", "text": text}]},
+            timeout=8,
+        )
+    except Exception as e:
+        print(f"[notify_customer_reply_line] {e}")
+
 # ── Session State Init ────────────────────────────────────────────────────────
 def init_state():
     defaults = {
@@ -613,6 +623,10 @@ def init_state():
             st.session_state[k] = v
 
     params = st.query_params
+    # OAuth 登入 callback 進行中（網址帶 code/state）時，不要動 query params，
+    # 交給 Streamlit 內建 auth 完成交握，避免把 callback 參數清掉造成 500。
+    if "code" in params or "state" in params:
+        return
     if "sid" in params and st.session_state.customer_sid is None:
         sid = params["sid"]
         sess = get_session(sid)
@@ -715,7 +729,9 @@ with st.sidebar:
                     st.error("新密碼至少 6 個字元")
                 elif new_pw != new_pw2:
                     st.error("兩次新密碼不一致")
-                elif old_pw != get_admin_password():
+                elif (_cur_pw := get_admin_password()) is None:
+                    st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
+                elif not hmac.compare_digest(old_pw.encode("utf-8"), _cur_pw.encode("utf-8")):
                     st.error("目前密碼錯誤")
                 else:
                     if set_admin_password(new_pw):
@@ -813,17 +829,20 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("""<small>
 <b>使用說明</b><br>
-① 選擇諮詢分區<br>
-② 填寫姓名與問題<br>
+① 用 Google 或 Email 登入<br>
+② 選擇分區、填寫姓名與問題<br>
 ③ 靜候小老師解讀回覆<br><br>
-設定查詢密碼可隨時回來查閱記錄。
+登入後小老師回覆會通知您，日後回來自動帶出您的紀錄。
 </small>""", unsafe_allow_html=True)
 
         st.markdown("---")
         with st.expander("🔐 管理入口"):
             pw = st.text_input("管理密碼", type="password", key="admin_pw")
             if st.button("進入管理後台", use_container_width=True):
-                if pw == get_admin_password():
+                _cur_pw = get_admin_password()
+                if _cur_pw is None:
+                    st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
+                elif pw and hmac.compare_digest(pw.encode("utf-8"), _cur_pw.encode("utf-8")):
                     st.session_state.admin_mode = True
                     st.session_state.page = "admin"
                     st.rerun()
@@ -855,6 +874,7 @@ localStorage.removeItem('iching_sid');
   function sidRedirect(){{
     var url = new URL(pwin.location.href);
     if (url.searchParams.get('sid') || url.searchParams.get('email')) return;
+    if (url.searchParams.get('code') || url.searchParams.get('state')) return; // OAuth callback 進行中，勿覆蓋
     var sid = pwin.localStorage.getItem('iching_sid');
     if (sid) {{ url.searchParams.set('sid', sid); pwin.location.href = url.toString(); return; }}
     var em = pwin.localStorage.getItem('iching_email');
@@ -889,6 +909,7 @@ localStorage.removeItem('iching_sid');
 (function(){
   const url = new URL(window.parent.location.href);
   if (url.searchParams.get('sid') || url.searchParams.get('email')) return;
+  if (url.searchParams.get('code') || url.searchParams.get('state')) return; // OAuth callback 進行中，勿覆蓋
   const sid = localStorage.getItem('iching_sid');
   if (sid) { url.searchParams.set('sid', sid); window.parent.location.href = url.toString(); return; }
   const em = localStorage.getItem('iching_email');
@@ -928,7 +949,7 @@ localStorage.removeItem('iching_sid');
 </div>""", unsafe_allow_html=True)
 
     if _google_enabled():
-        if st.user.is_logged_in:
+        if getattr(st.user, "is_logged_in", False):
             gem = (getattr(st.user, "email", "") or "").strip().lower()
             if gem and _valid_email(gem):
                 st.session_state.email = gem
@@ -981,6 +1002,7 @@ localStorage.setItem('iching_email', '{gem}');
                         st.session_state["_email_code"] = code
                         st.session_state["_email_code_addr"] = em
                         st.session_state["_email_code_exp"] = time.time() + 600
+                        st.session_state["_email_code_tries"] = 0
                         ok = send_email(
                             em, "您的登入驗證碼 · 洞察易生的經歷",
                             f"<p>您好，</p><p>您的登入驗證碼是：</p>"
@@ -993,7 +1015,7 @@ localStorage.setItem('iching_email', '{gem}');
                             st.session_state["_email_code_sent"] = True
                             st.success("驗證碼已寄出，請查看信箱（含垃圾信匣）。")
                         else:
-                            st.error("寄送失敗，請稍後再試，或改用下方查詢密碼。")
+                            st.error("寄送失敗，請稍後再試，或改用上方 Google 登入。")
             with ec2:
                 if st.session_state.get("_email_code_sent"):
                     if st.button("重新寄送", use_container_width=True, key="email_resend"):
@@ -1003,14 +1025,25 @@ localStorage.setItem('iching_email', '{gem}');
                 code_in = st.text_input("輸入 6 位數驗證碼", key="email_code_in",
                                         max_chars=6, placeholder="000000")
                 if st.button("驗證登入", use_container_width=True, key="email_verify"):
-                    if time.time() > st.session_state.get("_email_code_exp", 0):
+                    _real_code = st.session_state.get("_email_code", "")
+                    if not _real_code or time.time() > st.session_state.get("_email_code_exp", 0):
                         st.error("驗證碼已過期，請重新寄送。")
-                    elif (code_in or "").strip() != st.session_state.get("_email_code", "_"):
-                        st.error("驗證碼錯誤，請再確認。")
+                    elif not hmac.compare_digest((code_in or "").strip().encode("utf-8"), _real_code.encode("utf-8")):
+                        # 限制嘗試次數，避免 6 位數驗證碼在有效期內被暴力試完
+                        _tries = st.session_state.get("_email_code_tries", 0) + 1
+                        st.session_state["_email_code_tries"] = _tries
+                        if _tries >= 5:
+                            for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
+                                       "_email_code_tries", "_email_code_sent"):
+                                st.session_state.pop(_k, None)
+                            st.error("錯誤次數過多，驗證碼已失效，請重新寄送。")
+                        else:
+                            st.error(f"驗證碼錯誤，請再確認。（剩 {5 - _tries} 次）")
                     else:
                         em = st.session_state.get("_email_code_addr", "")
                         st.session_state.email = em
-                        for _k in ("_email_code", "_email_code_addr", "_email_code_exp", "_email_code_sent"):
+                        for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
+                                   "_email_code_tries", "_email_code_sent"):
                             st.session_state.pop(_k, None)
                         esess = get_open_session_by_email(em)
                         if esess:
@@ -1053,30 +1086,10 @@ localStorage.setItem('iching_email', '{em}');
             f"目前登入: {('✅ '+(getattr(st.user, 'email', '') or '')) if (_google_enabled() and getattr(st.user, 'is_logged_in', False)) else '未登入'}。"
         )
 
-    with st.expander("📱 查詢我的諮詢記錄"):
-        lookup_phone = st.text_input("輸入當時設定的查詢密碼", placeholder="您設定的查詢密碼", label_visibility="collapsed")
-        if st.button("查詢記錄", use_container_width=True):
-            phone_clean = lookup_phone.strip()
-            if not phone_clean:
-                st.error("請輸入查詢密碼")
-            else:
-                sess = get_session_by_phone(phone_clean)
-                if sess is _DB_ERROR:
-                    st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
-                elif sess:
-                    found_sid = sess["session_id"]
-                    st.session_state.customer_sid = found_sid
-                    st.session_state.customer_name = sess["customer_name"] or ""
-                    st.session_state.customer_category = sess.get("category", "")
-                    st.session_state.page = "chat"
-                    _components.html(f"""<script>
-localStorage.setItem('iching_sid', '{found_sid}');
-window.parent.location.href = '?sid={found_sid}';
-</script>""", height=0)
-                    st.stop()
-                else:
-                    st.error("找不到記錄，或諮詢已結案。")
-        st.caption("忘記查詢密碼？請告知小老師您的姓名，由小老師協助查詢。")
+    # 須先登入（Email／Google／LINE）才能問卦——每筆問卦都綁定身分，安全且日後一定查得到。
+    _logged_in = bool(st.session_state.email or st.session_state.line_uid)
+    if not _logged_in:
+        st.info("🔒 請先用上方的 **Google** 或 **Email** 登入，再選擇分區問卦。登入後小老師的回覆會通知您，日後回來自動帶出您的紀錄。")
 
     cats = list(CATEGORIES.items())
     col_a, col_b = st.columns(2, gap="large")
@@ -1088,7 +1101,8 @@ window.parent.location.href = '?sid={found_sid}';
 <div class="cat-name">{cat_name}</div>
 <div class="cat-desc">{info["desc"]}</div>
 </div>""", unsafe_allow_html=True)
-            if st.button("進入諮詢", key=f"enter_{cat_name}", use_container_width=True):
+            if st.button("進入諮詢", key=f"enter_{cat_name}", use_container_width=True,
+                         disabled=not _logged_in):
                 st.session_state.selected_cat = cat_name
                 st.session_state.page = "register"
                 st.rerun()
@@ -1103,11 +1117,21 @@ def show_register():
 
     info = CATEGORIES[cat_name]
 
-    # 待修二：全新問問題頁也要能回首頁
+    # 全新問問題頁也要能回首頁
     if st.button("← 返回首頁", key="reg_back_home"):
         st.session_state.page = "home"
         st.session_state.selected_cat = None
         st.rerun()
+
+    # 強制先登入才能問卦：每筆問卦都綁定 Email／Google／LINE 身分，安全且日後一定查得到。
+    if not (st.session_state.email or st.session_state.line_uid):
+        st.warning("🔒 請先登入再問卦。")
+        st.info("回到首頁，用 **Google** 或 **Email** 登入後即可開始問卦。")
+        if st.button("← 回首頁登入", key="reg_need_login"):
+            st.session_state.page = "home"
+            st.session_state.selected_cat = None
+            st.rerun()
+        return
 
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
@@ -1123,7 +1147,7 @@ def show_register():
     _via_line = bool(st.session_state.line_uid)
     _via_email = bool(st.session_state.email)
     if _via_line:
-        st.caption("✅ 您已透過 LINE 登入，日後可直接從 LINE 選單回來查看回覆，免輸入密碼。")
+        st.caption("✅ 您已透過 LINE 登入，日後可直接從 LINE 選單回來查看回覆。")
     elif _via_email:
         st.caption(f"✅ 您已用 Email（{st.session_state.email}）登入，小老師回覆時會寄信通知您，日後回來免再輸入。")
 
@@ -1146,12 +1170,6 @@ def show_register():
         name = st.text_input("您的姓名",
                              value=st.session_state.line_name or st.session_state.get("name_prefill", "") or "",
                              placeholder="請輸入姓名")
-        if _via_line:
-            phone = st.text_input("查詢密碼（選填，LINE 用戶可留空）",
-                                  placeholder="留空即可，您可從 LINE 選單回來查看")
-        else:
-            phone = st.text_input("查詢密碼（選填，可用手機號、暱稱等任意文字）",
-                                  placeholder="設定一個您記得住的查詢密碼")
         question = st.text_area(
             "您的問題",
             placeholder="請輸入您想詢問的問題⋯⋯",
@@ -1165,14 +1183,15 @@ def show_register():
         elif not question.strip():
             st.error("請填寫問題")
         else:
-            sid = create_session(name.strip(), cat_name, phone.strip(),
+            sid = create_session(name.strip(), cat_name,
                                  line_uid=st.session_state.line_uid,
                                  email=st.session_state.email)
             if not sid:
                 return
             if not add_message(sid, "customer", question.strip()):
-                delete_session(sid)  # remove orphaned session so phone lookup won't surface it
+                delete_session(sid)  # remove orphaned session
                 return
+            st.session_state.pop("name_prefill", None)  # 用過即清，避免殘留預填到別人/別次
             st.success("問卦已送出，正在跳轉⋯⋯")
             send_notification(name.strip(), cat_name, question.strip(), sid)
             _components.html(f"""<script>
@@ -1447,34 +1466,26 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
     back_label = "← 歸檔" if back_page == "admin_archive" else "← 後台"
     if st.button(back_label):
         st.session_state.pop(f"_del_confirm_{sid}", None)
+        st.session_state.pop(f"_close_confirm_{sid}", None)
         st.session_state.page = back_page
         st.session_state.admin_reply_sid = None
         st.rerun()
 
     cname_esc = _html.escape(sess["customer_name"] or "（未知）")
-    pref = sess.get("preference", "") or ""
-    pref_trunc = pref[:40] + ("…" if len(pref) > 40 else "")
-    pref_esc = _html.escape(pref_trunc)
-    pref_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{pref_esc}</span>' if pref else '<span style="color:#B8A070;font-style:italic;">（未設定）</span>'
     email_val = (sess.get("email") or "").strip()
     email_esc = _html.escape(email_val)
-    email_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{email_esc}</span>' if email_val else '<span style="color:#B8A070;font-style:italic;">（未提供，此顧客非 Email 登入）</span>'
+    email_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{email_esc}</span>' if email_val else '<span style="color:#B8A070;font-style:italic;">（非 Email 登入）</span>'
+    line_display = '<span style="color:#A0C870;">✓ 是</span>' if (sess.get("line_uid") or "").strip() else '<span style="color:#B8A070;font-style:italic;">否</span>'
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
 <div class="chat-hdr-title">{cname_esc} · {category}</div>
 <div class="chat-hdr-sub">編號：{sid} · 建立：{fmt_time(sess['created_at'])}</div>
-<div class="chat-hdr-sub" style="margin-top:4px;">🔑 查詢密碼：{pref_display}</div>
-<div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}</div>
+<div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}　·　💬 LINE 登入：{line_display}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
-
-    if pref:
-        _dup_count = count_sessions_by_phone(pref)
-        if _dup_count > 1:
-            st.warning(f"⚠️ 查詢密碼「{_html.escape(pref[:40])}」目前有 {_dup_count} 筆進行中問卦共用，查詢時只顯示最新一筆。")
 
     messages = get_messages(sid)
     if messages is None:
@@ -1565,6 +1576,7 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
             if reply.strip():
                 if add_message(sid, "consultant", reply.strip()):
                     notify_customer_reply_email(sid)
+                    notify_customer_reply_line(sess)
                     st.session_state["_clear_reply_draft"] = sid
                     st.session_state.reply_ver += 1
                     st.rerun()
@@ -1578,16 +1590,29 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
             st.rerun()
     with r3:
         if st.button("✅ 結案歸檔", use_container_width=True):
-            if close_session(sid):
-                st.session_state.pop(f"_del_confirm_{sid}", None)
-                st.session_state.page = "admin"
-                st.session_state.admin_reply_sid = None
-                st.rerun()
-            # else: error shown by close_session(), stay on page
+            st.session_state[f"_close_confirm_{sid}"] = True
+            st.rerun()
     with r4:
         if st.button("🗑️ 刪除問卦", use_container_width=True):
             st.session_state[f"_del_confirm_{sid}"] = True
             st.rerun()
+
+    if st.session_state.get(f"_close_confirm_{sid}"):
+        st.warning("確定要結案並歸檔此問卦？歸檔後顧客將無法再於此對話追問。")
+        cc1, cc2, _ = st.columns([1, 1, 2])
+        with cc1:
+            if st.button("✅ 確認結案", key=f"_close_yes_{sid}"):
+                if close_session(sid):
+                    st.session_state.pop(f"_close_confirm_{sid}", None)
+                    st.session_state.pop(f"_del_confirm_{sid}", None)
+                    st.session_state.page = "admin"
+                    st.session_state.admin_reply_sid = None
+                    st.rerun()
+                # else: error shown by close_session(), keep dialog open
+        with cc2:
+            if st.button("❌ 取消", key=f"_close_no_{sid}"):
+                st.session_state.pop(f"_close_confirm_{sid}", None)
+                st.rerun()
 
     if st.session_state.get(f"_del_confirm_{sid}"):
         st.error("⚠️ 確定要永久刪除此問卦及所有訊息？此操作無法復原。")

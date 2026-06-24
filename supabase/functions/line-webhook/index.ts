@@ -26,7 +26,7 @@ async function verifySignature(body: string, sig: string): Promise<boolean> {
 }
 
 async function pushLine(text: string) {
-  await fetch("https://api.line.me/v2/bot/message/push", {
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${LINE_TOKEN}`,
@@ -37,10 +37,11 @@ async function pushLine(text: string) {
       messages: [{ type: "text", text }],
     }),
   });
+  if (!res.ok) console.error(`[pushLine] ${res.status} ${await res.text()}`);
 }
 
 async function replyLine(replyToken: string, text: string) {
-  await fetch("https://api.line.me/v2/bot/message/reply", {
+  const res = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${LINE_TOKEN}`,
@@ -51,6 +52,7 @@ async function replyLine(replyToken: string, text: string) {
       messages: [{ type: "text", text }],
     }),
   });
+  if (!res.ok) console.error(`[replyLine] ${res.status} ${await res.text()}`);
 }
 
 const VISITOR_REPLY = `您好！歡迎來到洞察易生的經歷 🌿
@@ -177,6 +179,87 @@ const HELP = `📖 可用指令：
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
+async function handleEvent(evt: any): Promise<void> {
+  if (evt.type !== "message" || evt.message?.type !== "text") return;
+
+  // Non-admin visitor → 若此 LINE 帳號有進行中問卦，把留言存進去並通知小老師
+  if (evt.source?.userId !== ADMIN_USER_ID) {
+    const uid = evt.source?.userId;
+    let handled = false;
+    if (uid) {
+      const { data: sess } = await supabase
+        .from("sessions")
+        .select("session_id, customer_name, category")
+        .eq("line_uid", uid)
+        .eq("is_closed", false)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (sess) {
+        const text = (evt.message.text as string).trim();
+        await supabase.from("messages").insert({
+          session_id: sess.session_id,
+          role: "customer",
+          content: text,
+          created_at: new Date().toISOString(),
+        });
+        await supabase
+          .from("sessions")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("session_id", sess.session_id);
+        // 先用 reply token（約 1 分鐘就過期）回覆顧客，再做較慢的 admin 推播
+        if (evt.replyToken) {
+          await replyLine(
+            evt.replyToken,
+            "已收到您的提問 🌿 小老師會盡快為您解卦，可點下方選單「📖 我的回覆」查看進度。",
+          );
+        }
+        await pushLine(
+          `【追加提問】\n姓名：${sess.customer_name ?? "？"}\n分區：${sess.category}\n編號：${sess.session_id}\n\n問題：\n${text.slice(0, 200)}`,
+        );
+        handled = true;
+      }
+    }
+    if (!handled && evt.replyToken) await replyLine(evt.replyToken, VISITOR_REPLY);
+    return;
+  }
+
+  const text = (evt.message.text as string).trim();
+  let reply = "";
+
+  if (text === "統計") {
+    reply = await cmdStats();
+  } else if (text === "待辦") {
+    reply = await cmdPending();
+  } else if (text === "說明" || text === "help" || text === "？" || text === "?") {
+    reply = HELP;
+  } else {
+    // Expect: "{SID} {command or reply}"
+    const spaceIdx = text.indexOf(" ");
+    if (spaceIdx === -1) {
+      reply = HELP;
+    } else {
+      const sid = text.slice(0, spaceIdx).toUpperCase();
+      const rest = text.slice(spaceIdx + 1).trim();
+      if (rest === "查詢") {
+        reply = await cmdView(sid);
+      } else if (rest === "結案") {
+        reply = await cmdClose(sid);
+      } else if (rest.length > 0) {
+        reply = await cmdReply(sid, rest);
+      } else {
+        reply = HELP;
+      }
+    }
+  }
+
+  // admin 指令：有 reply token 就用 reply（不耗推播額度），否則 push
+  if (reply) {
+    if (evt.replyToken) await replyLine(evt.replyToken, reply);
+    else await pushLine(reply);
+  }
+}
+
 serve(async (req) => {
   if (req.method !== "POST") return new Response("OK", { status: 200 });
 
@@ -187,84 +270,31 @@ serve(async (req) => {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const payload = JSON.parse(body);
+  let payload: any;
+  try {
+    payload = JSON.parse(body);
+  } catch (_e) {
+    // 空 body／LINE 後台「Verify」按鈕／壞 JSON：回 200，避免端點被標記不穩定而重送
+    return new Response("OK", { status: 200 });
+  }
   const events = payload.events ?? [];
 
-  for (const evt of events) {
-    if (evt.type !== "message" || evt.message?.type !== "text") continue;
-
-    // Non-admin visitor → 若此 LINE 帳號有進行中問卦，把留言存進去並通知小老師
-    if (evt.source?.userId !== ADMIN_USER_ID) {
-      const uid = evt.source?.userId;
-      let handled = false;
-      if (uid) {
-        const { data: sess } = await supabase
-          .from("sessions")
-          .select("session_id, customer_name, category")
-          .eq("line_uid", uid)
-          .eq("is_closed", false)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (sess) {
-          const text = (evt.message.text as string).trim();
-          await supabase.from("messages").insert({
-            session_id: sess.session_id,
-            role: "customer",
-            content: text,
-            created_at: new Date().toISOString(),
-          });
-          await supabase
-            .from("sessions")
-            .update({ updated_at: new Date().toISOString() })
-            .eq("session_id", sess.session_id);
-          await pushLine(
-            `【追加提問】\n姓名：${sess.customer_name ?? "？"}\n分區：${sess.category}\n編號：${sess.session_id}\n\n問題：\n${text.slice(0, 200)}`,
-          );
-          if (evt.replyToken) {
-            await replyLine(
-              evt.replyToken,
-              "已收到您的提問 🌿 小老師會盡快為您解卦，可點下方選單「📖 我的回覆」查看進度。",
-            );
-          }
-          handled = true;
-        }
-      }
-      if (!handled && evt.replyToken) await replyLine(evt.replyToken, VISITOR_REPLY);
-      continue;
-    }
-
-    const text = (evt.message.text as string).trim();
-    let reply = "";
-
-    if (text === "統計") {
-      reply = await cmdStats();
-    } else if (text === "待辦") {
-      reply = await cmdPending();
-    } else if (text === "說明" || text === "help" || text === "？" || text === "?") {
-      reply = HELP;
-    } else {
-      // Expect: "{SID} {command or reply}"
-      const spaceIdx = text.indexOf(" ");
-      if (spaceIdx === -1) {
-        reply = HELP;
-      } else {
-        const sid = text.slice(0, spaceIdx).toUpperCase();
-        const rest = text.slice(spaceIdx + 1).trim();
-        if (rest === "查詢") {
-          reply = await cmdView(sid);
-        } else if (rest === "結案") {
-          reply = await cmdClose(sid);
-        } else if (rest.length > 0) {
-          reply = await cmdReply(sid, rest);
-        } else {
-          reply = HELP;
-        }
+  const work = (async () => {
+    for (const evt of events) {
+      try {
+        await handleEvent(evt);
+      } catch (e) {
+        console.error("[handleEvent]", e);
       }
     }
+  })();
 
-    if (reply) await pushLine(reply);
+  // 立刻回 200 給 LINE，事件在背景處理，避免處理太慢被 LINE 重送（造成重複寫入／重複推播）
+  try {
+    // @ts-ignore EdgeRuntime 由 Supabase Edge Functions 執行環境提供
+    EdgeRuntime.waitUntil(work);
+  } catch (_e) {
+    await work; // 後備：沒有 EdgeRuntime 時退回同步處理
   }
-
   return new Response("OK", { status: 200 });
 });
