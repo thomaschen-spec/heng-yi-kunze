@@ -256,19 +256,26 @@ def _enrich(sessions):
     return result
 
 def _db_selftest():
-    """?debug=1 用：定位「寫得進、讀不回」類問題。回報①金鑰角色(anon/service_role)
-    ②目前可讀到幾筆 sessions ③一次寫入→讀回→刪除的真實往返。
-    若角色=anon 且寫入 OK 但讀回 ❌ → 就是 RLS 把 SELECT 擋掉了。"""
+    """?debug=1 用：定位「寫得進、讀不回」類問題。回報①金鑰類型(prefix，分得出 secret/publishable/JWT)
+    ②目前可讀到幾筆 sessions ③寫入一筆探針後，用「加引號(_eqv) vs 不加引號」兩種方式讀回。
+    - 不加引號讀得到、加引號讀不到 → 是 _eqv 雙引號害的（跟金鑰無關，要修 code）。
+    - 兩種都讀不到 → 寫入沒持久化／RLS 擋（與金鑰/RLS 有關）。"""
     import json as _json, base64 as _b64
     out = []
     key = st.secrets.get("supabase_key", "")
-    try:
-        pl = key.split(".")[1]
-        pl += "=" * (-len(pl) % 4)
-        role = _json.loads(_b64.urlsafe_b64decode(pl)).get("role", "?")
-    except Exception:
-        role = "(非 JWT，無法解析)"
-    out.append(f"金鑰角色={role}")
+    if key.startswith("sb_secret_"):
+        ktype = "sb_secret_（service_role，繞過 RLS）✅"
+    elif key.startswith("sb_publishable_"):
+        ktype = "sb_publishable_（公開金鑰，受 RLS 管）⚠"
+    elif key.startswith("eyJ"):
+        try:
+            pl = key.split(".")[1]; pl += "=" * (-len(pl) % 4)
+            ktype = f"JWT role={_json.loads(_b64.urlsafe_b64decode(pl)).get('role','?')}"
+        except Exception:
+            ktype = "JWT(無法解析)"
+    else:
+        ktype = f"未知({key[:12]}…)" if key else "（空）"
+    out.append(f"金鑰類型={ktype}")
     try:
         rows = _get("sessions", {"select": "session_id", "limit": "200"})
         out.append(f"可讀 sessions={len(rows)} 筆")
@@ -278,10 +285,16 @@ def _db_selftest():
     try:
         _post("sessions", {"session_id": probe, "customer_name": "_selftest",
                            "category": "_test", "preference": ""})
-        back = _get("sessions", {"session_id": _eqv(probe), "limit": "1"})
-        out.append("寫入=OK、讀回=" + ("OK ✅" if back else "讀不到 ❌（RLS 擋 SELECT 或金鑰非 service_role）"))
+        q = _get("sessions", {"session_id": _eqv(probe), "limit": "1"})            # 加引號 eq."值"
+        u = _get("sessions", {"session_id": f"eq.{probe}", "limit": "1"})          # 不加引號 eq.值
+        out.append("寫入=OK、讀回[加引號]=" + ("✅" if q else "❌") +
+                   "、讀回[不加引號]=" + ("✅" if u else "❌"))
+        if u and not q:
+            out.append("➜ 結論：_eqv 雙引號害的（跟金鑰無關）")
+        elif not u and not q:
+            out.append("➜ 結論：寫入沒持久化或 RLS 擋（查金鑰/RLS）")
         try:
-            _delete("sessions", {"session_id": _eqv(probe)})
+            _delete("sessions", {"session_id": f"eq.{probe}"})
         except Exception:
             pass
     except Exception as e:
