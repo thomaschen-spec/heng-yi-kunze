@@ -724,7 +724,8 @@ def init_state():
             # token 已證明此人擁有這筆問卦，綁定的 email 可安全記住（供回覆通知等用）
             if sess.get("email"):
                 st.session_state.email = (sess.get("email") or "").lower()
-            st.session_state.page = "chat"
+            # 停在首頁、由「進行中諮詢」橫幅讓顧客自己選擇回去看回覆（不再強制跳進對話）
+            st.session_state.page = "home"
 
 init_state()
 
@@ -985,32 +986,10 @@ localStorage.removeItem('iching_email');
                 gname = (getattr(st.user, "name", "") or "").strip()
                 if gname:
                     st.session_state["name_prefill"] = gname
-                # email 由 Google 驗證過，依此身分找進行中問卦是安全的（非 URL 來的偽造身分）
-                gsess = get_open_session_by_email(gem)
-                if gsess is _DB_ERROR:
-                    # L1：DB 抖動時別誤判成「沒問卦」，否則顧客會被導去重新提問→重複建檔
-                    st.warning("⚠️ 資料庫暫時忙碌，無法確認您的問卦記錄。請先別重新提問（以免重複），點下方重新整理再試。")
-                    if st.button("🔄 重新整理", key="_g_resume_retry"):
-                        st.rerun()
-                    st.stop()
-                elif gsess:
-                    st.session_state.customer_sid = gsess["session_id"]
-                    st.session_state.customer_name = gsess["customer_name"] or gname
-                    st.session_state.customer_category = gsess.get("category", "")
-                    st.session_state.page = "chat"
-                    # L2/L3：導向走 Streamlit 原生 query param（可靠，不依賴 JS 跳 parent），
-                    # 並把 token 寫進 localStorage 供日後自動回登；token 拿不到也照樣進得了聊天室
-                    # （customer_sid 已在 session_state），不再有「JS 沒跳成就卡白頁」或無限 rerun。
-                    _gtok = _ensure_token(gsess)
-                    if _gtok:
-                        _components.html(
-                            f"<script>localStorage.setItem('iching_token','{_gtok}');</script>",
-                            height=0)
-                        st.query_params["token"] = _gtok
-                    st.rerun()
-                else:
-                    st.success(f"✅ 已用 Google 登入（{gem}）！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
-                    st.button("登出 Google", on_click=st.logout, key="g_logout")
+                # 只設定身分、不強制跳轉；若有進行中問卦，由下方「進行中諮詢」橫幅讓顧客自己選擇回去
+                # （取代舊的「自動跳進對話」——顧客會被困在對話、到不了首頁、也不能問新問題）。
+                st.success(f"✅ 已用 Google 登入（{gem}）")
+                st.button("登出 Google", on_click=st.logout, key="g_logout")
             else:
                 st.warning("Google 登入未取得 Email，請改用下方 Email 登入。")
                 st.button("登出 Google", on_click=st.logout, key="g_logout_noemail")
@@ -1077,31 +1056,13 @@ localStorage.removeItem('iching_email');
                             st.error(f"驗證碼錯誤，請再確認。（剩 {5 - _tries} 次）")
                     else:
                         em = st.session_state.get("_email_code_addr", "")
-                        # email 剛通過驗證碼，依此身分找進行中問卦是安全的
-                        esess = get_open_session_by_email(em)
-                        if esess is _DB_ERROR:
-                            # L1：DB 抖動 → 別清驗證碼狀態、別誤判「沒問卦」，讓顧客直接再按一次驗證
-                            st.error("⚠️ 資料庫暫時忙碌，請稍候再按一次「驗證登入」（驗證碼仍有效）。")
-                        else:
-                            st.session_state.email = em
-                            for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
-                                       "_email_code_tries", "_email_code_sent"):
-                                st.session_state.pop(_k, None)
-                            if esess:
-                                st.session_state.customer_sid = esess["session_id"]
-                                st.session_state.customer_name = esess["customer_name"] or ""
-                                st.session_state.customer_category = esess.get("category", "")
-                                st.session_state.page = "chat"
-                                # L2/L3：原生 query param 導向 + localStorage 記 token，拿不到 token 也進得了
-                                _etok = _ensure_token(esess)
-                                if _etok:
-                                    _components.html(
-                                        f"<script>localStorage.setItem('iching_token','{_etok}');</script>",
-                                        height=0)
-                                    st.query_params["token"] = _etok
-                                st.rerun()
-                            else:
-                                st.success("✅ 登入成功！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
+                        st.session_state.email = em
+                        for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
+                                   "_email_code_tries", "_email_code_sent"):
+                            st.session_state.pop(_k, None)
+                        # 只設定身分、不強制跳轉；有進行中問卦由下方橫幅讓顧客自己選擇回去
+                        st.success("✅ 登入成功！")
+                        st.rerun()
             st.caption("輸入 Email 收驗證碼即可登入；小老師回覆時會寄信通知您，點信中連結即可回來查看。")
     else:
         # 診斷行（新版才有）：看得到這行 = 新程式已上線；看不到 = 還在跑舊程式。
@@ -1125,6 +1086,33 @@ localStorage.removeItem('iching_email');
             f"目前登入: {('✅ '+(getattr(st.user, 'email', '') or '')) if (_google_enabled() and getattr(st.user, 'is_logged_in', False)) else '未登入'}。"
         )
         st.caption("🔧 DB 自我測試 — " + _db_selftest())
+
+    # 進行中諮詢橫幅：已登入／持 token 且有未結案問卦時，停在首頁讓顧客「自己選」回去看回覆，
+    # 取代舊的「自動跳進對話」（會把顧客困在對話、到不了首頁、也不能問新問題）。
+    # token 來的用 customer_sid 直接查；Google／Email 登入的用身分（email/line_uid）查。
+    _resume = None
+    _csid = st.session_state.get("customer_sid")
+    if _csid:
+        _cs = get_session(_csid)
+        if _cs is not _DB_ERROR:
+            if _cs and not _cs.get("is_closed"):
+                _resume = _cs
+            else:
+                st.session_state.customer_sid = None  # 已結案／被刪 → 清掉失效指標
+    if _resume is None:
+        _f = find_my_open_session()
+        if _f and _f is not _DB_ERROR:
+            _resume = _f
+    if _resume:
+        _rcat = _resume.get("category", "")
+        st.info(f"💬 您有一則進行中的諮詢（{_rcat}），小老師的回覆都在裡面。")
+        if st.button("→ 回到對話查看回覆", key="_home_resume", use_container_width=True):
+            st.session_state.customer_sid = _resume["session_id"]
+            st.session_state.customer_name = _resume.get("customer_name") or ""
+            st.session_state.customer_category = _rcat
+            st.session_state.page = "chat"
+            st.rerun()
+        st.caption("想問一個全新的問題？也可以直接往下選分區開始。")
 
     # 須先登入（Email／Google／LINE）才能問卦——每筆問卦都綁定身分，安全且日後一定查得到。
     _logged_in = bool(st.session_state.email or st.session_state.line_uid)
