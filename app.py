@@ -255,6 +255,39 @@ def _enrich(sessions):
         })
     return result
 
+def _db_selftest():
+    """?debug=1 用：定位「寫得進、讀不回」類問題。回報①金鑰角色(anon/service_role)
+    ②目前可讀到幾筆 sessions ③一次寫入→讀回→刪除的真實往返。
+    若角色=anon 且寫入 OK 但讀回 ❌ → 就是 RLS 把 SELECT 擋掉了。"""
+    import json as _json, base64 as _b64
+    out = []
+    key = st.secrets.get("supabase_key", "")
+    try:
+        pl = key.split(".")[1]
+        pl += "=" * (-len(pl) % 4)
+        role = _json.loads(_b64.urlsafe_b64decode(pl)).get("role", "?")
+    except Exception:
+        role = "(非 JWT，無法解析)"
+    out.append(f"金鑰角色={role}")
+    try:
+        rows = _get("sessions", {"select": "session_id", "limit": "200"})
+        out.append(f"可讀 sessions={len(rows)} 筆")
+    except Exception as e:
+        out.append(f"讀 sessions 失敗={type(e).__name__}")
+    probe = "DBTEST" + _secrets.token_hex(2).upper()
+    try:
+        _post("sessions", {"session_id": probe, "customer_name": "_selftest",
+                           "category": "_test", "preference": ""})
+        back = _get("sessions", {"session_id": _eqv(probe), "limit": "1"})
+        out.append("寫入=OK、讀回=" + ("OK ✅" if back else "讀不到 ❌（RLS 擋 SELECT 或金鑰非 service_role）"))
+        try:
+            _delete("sessions", {"session_id": _eqv(probe)})
+        except Exception:
+            pass
+    except Exception as e:
+        out.append(f"寫入往返失敗={type(e).__name__}:{str(e)[:90]}")
+    return " · ".join(out)
+
 def create_session(name: str, category: str, line_uid: str = "", email: str = ""):
     """建立問卦，回傳 (session_id, token)。token 是猜不到的隨機字串，是日後回來查看的唯一鑰匙。
     失敗回 (None, None)；若 DB 欄位尚未建立則退而求其次仍送出，但 token 回空字串。"""
@@ -1062,6 +1095,7 @@ window.parent.location.href = '?token={_etok}';
             f"redirect_uri: {st.secrets.get('auth', {}).get('redirect_uri', '（未設定）') if _google_enabled() else '—'}、"
             f"目前登入: {('✅ '+(getattr(st.user, 'email', '') or '')) if (_google_enabled() and getattr(st.user, 'is_logged_in', False)) else '未登入'}。"
         )
+        st.caption("🔧 DB 自我測試 — " + _db_selftest())
 
     # 須先登入（Email／Google／LINE）才能問卦——每筆問卦都綁定身分，安全且日後一定查得到。
     _logged_in = bool(st.session_state.email or st.session_state.line_uid)
