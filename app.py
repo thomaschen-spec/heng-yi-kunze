@@ -356,8 +356,11 @@ def _ensure_token(sess) -> str:
     except Exception:
         return ""
 
+_DB_ERROR = object()  # sentinel: DB unreachable (distinct from "session not found")
+
 def get_open_session_by_line_uid(uid: str):
-    """LINE 用戶的免密碼自動登入：找此 LINE 帳號最新一筆未結案問卦。"""
+    """LINE 用戶的免密碼自動登入：找此 LINE 帳號最新一筆未結案問卦。
+    找不到回 None；DB 異常回 _DB_ERROR（呼叫端須區分，別把「DB 抖一下」當成「沒有問卦」→ 避免顧客重複建檔）。"""
     if not uid:
         return None
     try:
@@ -369,10 +372,11 @@ def get_open_session_by_line_uid(uid: str):
         })
         return data[0] if data else None
     except Exception:
-        return None  # 欄位不存在或 DB 異常 → 不自動登入，不報錯
+        return _DB_ERROR  # DB 異常：不可當成「沒有問卦」
 
 def get_open_session_by_email(email: str):
-    """Email 登入：找此 email 最新一筆未結案問卦。"""
+    """Email 登入：找此 email 最新一筆未結案問卦。
+    找不到回 None；DB 異常回 _DB_ERROR（呼叫端須區分，避免 DB 抖動時誤判成「沒問卦」害顧客重複建檔）。"""
     if not email:
         return None
     try:
@@ -384,24 +388,22 @@ def get_open_session_by_email(email: str):
         })
         return data[0] if data else None
     except Exception:
-        return None  # 欄位不存在或 DB 異常 → 不自動登入，不報錯
+        return _DB_ERROR  # DB 異常：不可當成「沒有問卦」
 
 def find_my_open_session():
-    """依目前登入身分（email / LINE）找此顧客最新一筆未結案問卦，找不到回 None。
-    給「全新問問題」頁面顯示『切換回進行中對話』入口用。"""
+    """依目前登入身分（email / LINE）找此顧客最新一筆未結案問卦，找不到/DB 異常都回 None。
+    （這只用於顯示『切換回進行中對話』便利按鈕，DB 抖動時不顯示即可，不影響正確性。）"""
     em = st.session_state.get("email", "")
     if em:
         s = get_open_session_by_email(em)
-        if s:
+        if s and s is not _DB_ERROR:
             return s
     uid = st.session_state.get("line_uid", "")
     if uid:
         s = get_open_session_by_line_uid(uid)
-        if s:
+        if s and s is not _DB_ERROR:
             return s
     return None
-
-_DB_ERROR = object()  # sentinel: DB unreachable (distinct from "session not found")
 
 def get_session(sid: str):
     try:
@@ -985,20 +987,27 @@ localStorage.removeItem('iching_email');
                     st.session_state["name_prefill"] = gname
                 # email 由 Google 驗證過，依此身分找進行中問卦是安全的（非 URL 來的偽造身分）
                 gsess = get_open_session_by_email(gem)
-                if gsess:
+                if gsess is _DB_ERROR:
+                    # L1：DB 抖動時別誤判成「沒問卦」，否則顧客會被導去重新提問→重複建檔
+                    st.warning("⚠️ 資料庫暫時忙碌，無法確認您的問卦記錄。請先別重新提問（以免重複），點下方重新整理再試。")
+                    if st.button("🔄 重新整理", key="_g_resume_retry"):
+                        st.rerun()
+                    st.stop()
+                elif gsess:
                     st.session_state.customer_sid = gsess["session_id"]
                     st.session_state.customer_name = gsess["customer_name"] or gname
                     st.session_state.customer_category = gsess.get("category", "")
                     st.session_state.page = "chat"
+                    # L2/L3：導向走 Streamlit 原生 query param（可靠，不依賴 JS 跳 parent），
+                    # 並把 token 寫進 localStorage 供日後自動回登；token 拿不到也照樣進得了聊天室
+                    # （customer_sid 已在 session_state），不再有「JS 沒跳成就卡白頁」或無限 rerun。
                     _gtok = _ensure_token(gsess)
                     if _gtok:
-                        _components.html(f"""<script>
-localStorage.setItem('iching_token', '{_gtok}');
-window.parent.location.href = '?token={_gtok}';
-</script>""", height=0)
-                        st.stop()
-                    else:
-                        st.rerun()
+                        _components.html(
+                            f"<script>localStorage.setItem('iching_token','{_gtok}');</script>",
+                            height=0)
+                        st.query_params["token"] = _gtok
+                    st.rerun()
                 else:
                     st.success(f"✅ 已用 Google 登入（{gem}）！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
                     st.button("登出 Google", on_click=st.logout, key="g_logout")
@@ -1068,28 +1077,31 @@ window.parent.location.href = '?token={_gtok}';
                             st.error(f"驗證碼錯誤，請再確認。（剩 {5 - _tries} 次）")
                     else:
                         em = st.session_state.get("_email_code_addr", "")
-                        st.session_state.email = em
-                        for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
-                                   "_email_code_tries", "_email_code_sent"):
-                            st.session_state.pop(_k, None)
                         # email 剛通過驗證碼，依此身分找進行中問卦是安全的
                         esess = get_open_session_by_email(em)
-                        if esess:
-                            st.session_state.customer_sid = esess["session_id"]
-                            st.session_state.customer_name = esess["customer_name"] or ""
-                            st.session_state.customer_category = esess.get("category", "")
-                            st.session_state.page = "chat"
-                            _etok = _ensure_token(esess)
-                            if _etok:
-                                _components.html(f"""<script>
-localStorage.setItem('iching_token', '{_etok}');
-window.parent.location.href = '?token={_etok}';
-</script>""", height=0)
-                                st.stop()
-                            else:
-                                st.rerun()
+                        if esess is _DB_ERROR:
+                            # L1：DB 抖動 → 別清驗證碼狀態、別誤判「沒問卦」，讓顧客直接再按一次驗證
+                            st.error("⚠️ 資料庫暫時忙碌，請稍候再按一次「驗證登入」（驗證碼仍有效）。")
                         else:
-                            st.success("✅ 登入成功！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
+                            st.session_state.email = em
+                            for _k in ("_email_code", "_email_code_addr", "_email_code_exp",
+                                       "_email_code_tries", "_email_code_sent"):
+                                st.session_state.pop(_k, None)
+                            if esess:
+                                st.session_state.customer_sid = esess["session_id"]
+                                st.session_state.customer_name = esess["customer_name"] or ""
+                                st.session_state.customer_category = esess.get("category", "")
+                                st.session_state.page = "chat"
+                                # L2/L3：原生 query param 導向 + localStorage 記 token，拿不到 token 也進得了
+                                _etok = _ensure_token(esess)
+                                if _etok:
+                                    _components.html(
+                                        f"<script>localStorage.setItem('iching_token','{_etok}');</script>",
+                                        height=0)
+                                    st.query_params["token"] = _etok
+                                st.rerun()
+                            else:
+                                st.success("✅ 登入成功！您目前沒有進行中的問卦，請於下方選擇分區開始提問。")
             st.caption("輸入 Email 收驗證碼即可登入；小老師回覆時會寄信通知您，點信中連結即可回來查看。")
     else:
         # 診斷行（新版才有）：看得到這行 = 新程式已上線；看不到 = 還在跑舊程式。
