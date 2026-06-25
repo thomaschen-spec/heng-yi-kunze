@@ -949,11 +949,13 @@ localStorage.removeItem('iching_email');
     _ann = get_announcement()
     if _ann:
         _ann_esc = _html.escape(_ann)
-        st.markdown(f"""<div style="overflow:hidden;background:linear-gradient(90deg,#2A1F0A,#3D2E0D,#2A1F0A);border:1px solid #7A5C3A;border-radius:8px;padding:10px 0;margin:10px 0;">
-<span style="display:inline-block;white-space:nowrap;animation:marquee-scroll 22s linear infinite;color:#F0D080;font-size:0.95rem;padding:0 30px;">
-📢 &nbsp;{_ann_esc}</span></div>
+        # 安全跑馬燈：用容器相對的 padding-left:100%（非視窗單位 100vw），
+        # 外層 overflow:hidden + max-width:100% 把動畫完全框在容器內，不會撐寬文件、不卡捲動。
+        st.markdown(f"""<div style="overflow:hidden;max-width:100%;background:linear-gradient(90deg,#2A1F0A,#3D2E0D,#2A1F0A);border:1px solid #7A5C3A;border-radius:8px;padding:10px 0;margin:10px 0;">
+<div style="display:inline-block;white-space:nowrap;padding-left:100%;animation:marquee-scroll 22s linear infinite;color:#F0D080;font-size:0.95rem;">
+📢 &nbsp;{_ann_esc}</div></div>
 <style>@keyframes marquee-scroll{{
-  0%{{transform:translateX(100vw)}} 100%{{transform:translateX(-100%)}}}}</style>""",
+  from{{transform:translateX(0)}} to{{transform:translateX(-100%)}}}}</style>""",
         unsafe_allow_html=True)
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
     if _self_closed:
