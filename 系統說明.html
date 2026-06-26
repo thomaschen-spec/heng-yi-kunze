@@ -287,7 +287,7 @@ flowchart TD
     <li><span class="pill ok">已完成</span> <strong>首頁「我的進行中諮詢」清單</strong>：列出登入身分所有未結案問卦（分區＋問題預覽＋待回覆/已回覆），點任一筆進該對話，取代舊的「只浮最新 1 筆」。<code>get_my_open_sessions()</code>。</li>
     <li><span class="pill ok">已完成</span> <strong>首頁「我的歷史紀錄」</strong>：已結案問卦唯讀回顧（結案會清 localStorage，這是顧客回看舊解卦的唯一入口）。重用 <code>show_chat</code> 結案分支，<code>get_my_closed_sessions()</code>，最多 20 筆。</li>
     <li><span class="pill ok">已完成</span> <strong>已結案可「重新開啟」追問</strong>：結案頁有「↻ 重新開啟、繼續問小老師」鈕，<code>reopen_session()</code> 把 <code>is_closed</code> 翻 false、bump <code>updated_at</code>（後台清單會浮回來），接著正常追問＋通知小老師。</li>
-    <li><span class="pill ok">已完成</span> <strong>大字體選項</strong>：顧客側欄「🔍 字體大小」標準／大／特大（客群偏年長）。非標準時注入放大 CSS（body／chat／按鈕 1.18／1.42rem）；選擇存 session_state，跨頁保留（關分頁會重設＝未做 localStorage 持久化）。</li>
+    <li><span class="pill ok">已完成</span> <strong>大字體選項</strong>：顧客側欄「🔍 字體大小」標準／大／特大（客群偏年長）。非標準時注入放大 CSS（body／chat／按鈕 1.18／1.42rem）。<strong>偏好跟著登入身分跨裝置永久記住</strong>：存進 <code>settings</code> 表 <code>font_pref_&lt;email/line_uid&gt;</code>（重用 <code>get_setting/set_setting</code>），登入時每身分每 session 載入一次、變更即存回。未登入則僅當次有效。</li>
     <li><span class="pill todo">待驗收</span> 無痕跑完整一輪：① email 登入 ② 問卦進得到聊天室、看到自己的問題 ③ 後台看得到、點得進、回得了 ④ 顧客收到回覆通知 email ⑤ 關分頁再開用 token 自動回登。</li>
   </ul>
   <div class="note">這份是「人看的對照手冊」；Claude 端的速記在記憶庫 <code>project_grr_bugfix_progress.md</code>，兩者分工，不重複。改規格或出新問題時，先翻對應區塊。</div>
