@@ -983,10 +983,26 @@ with st.sidebar:
         st.markdown("## ☯ 洞察易生的經歷")
         st.markdown("---")
 
-        # 大字體：問卦客群偏年長，提供放大選項方便閱讀解卦。選擇存 session_state，
-        # CSS 在側欄注入也全域生效（<style> 不受容器限制）。選「標準」不注入＝預設大小。
+        # 大字體：問卦客群偏年長，提供放大選項方便閱讀解卦。CSS 在側欄注入也全域生效。
+        # 偏好「跟著登入身分（email／line_uid）走、跨裝置記住」：存進 settings 表
+        # key=font_pref_<身分>（身分只含 _eqv 白名單字元，存查對得上）。未登入則僅當次有效。
+        _identity = (st.session_state.get("email", "") or st.session_state.get("line_uid", "") or "")
+        # 每身分每 session 只查一次 DB 載入；之後靠 session_state，不每次 rerun 都打 DB。
+        if _identity and st.session_state.get("_font_loaded_for") != _identity:
+            _saved = get_setting("font_pref_" + _identity)
+            if _saved in ("標準", "大", "特大"):
+                st.session_state["font_size"] = _saved   # 須在 radio 建立前設，才會被當預設
+            st.session_state["_font_loaded_for"] = _identity
+            st.session_state["_font_saved_val"] = st.session_state.get("font_size", "標準")
+
         _font = st.radio("🔍 字體大小", ["標準", "大", "特大"], horizontal=True,
-                         key="font_size", help="覺得字小可以調大，方便看小老師的解卦。")
+                         key="font_size", help="覺得字小可以調大；登入後此設定會跟著您的帳號記住。")
+
+        # 使用者改了就存回此身分（跨裝置）。未登入（無身分）不存，僅當次有效。
+        if _identity and _font != st.session_state.get("_font_saved_val"):
+            if set_setting("font_pref_" + _identity, _font):
+                st.session_state["_font_saved_val"] = _font
+
         _font_sz = {"大": "1.18rem", "特大": "1.42rem"}.get(_font)
         if _font_sz:
             st.markdown(f"""<style>
