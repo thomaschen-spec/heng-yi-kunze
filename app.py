@@ -523,6 +523,15 @@ def set_admin_password(new_pw: str) -> bool:
         st.error(f"無法更新密碼：{e}")
         return False
 
+# 管理入口防暴力破解：固定延遲（換分頁/重開 session 也省不掉，這是 session-reset-proof 的核心）
+# + 算術驗證碼（擋掉最廉價的腳本）。session-based 的 5 次鎖只是 in-session 加碼，非主要防線。
+_ADMIN_ATTEMPT_DELAY = 1.2  # 每次嘗試付出的伺服器端延遲（秒）；拖慢暴力破解、對真人登入幾乎無感
+
+def _new_admin_captcha():
+    """產生新的加法驗證碼（用 secrets 不可預測），存入 session_state 供下次驗證。"""
+    st.session_state["_admin_cap_a"] = _secrets.randbelow(9) + 1
+    st.session_state["_admin_cap_b"] = _secrets.randbelow(9) + 1
+
 def get_announcement() -> str:
     try:
         data = _get("settings", {"key": "eq.announcement", "select": "value", "limit": "1"})
@@ -956,30 +965,44 @@ letter-spacing:0.05em;margin-bottom:10px;">🎁 目前為免費版</div>""", uns
         st.markdown("---")
         with st.expander("🔐 管理入口"):
             pw = st.text_input("管理密碼", type="password", key="admin_pw")
+            # 驗證碼題目穩定到下次提交才換（避免使用者打字時題目一直變）
+            if "_admin_cap_a" not in st.session_state:
+                _new_admin_captcha()
+            _ca = st.session_state["_admin_cap_a"]
+            _cb = st.session_state["_admin_cap_b"]
+            cap = st.text_input(f"驗證碼：{_ca} + {_cb} = ?", key="admin_cap_in")
             if st.button("進入管理後台", use_container_width=True):
+                # 固定延遲：每次嘗試都付出，換分頁/重開 session 也省不掉 → session-reset 無法加速暴力破解。
+                time.sleep(_ADMIN_ATTEMPT_DELAY)
                 _lock_until = st.session_state.get("_admin_lock_until", 0)
-                _cur_pw = get_admin_password()
                 if time.time() < _lock_until:
                     st.error(f"嘗試過多，請於 {int(_lock_until - time.time()) + 1} 秒後再試。")
-                elif _cur_pw is None:
-                    st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
-                elif not _cur_pw:
-                    st.error("尚未設定管理密碼，請於 Secrets 設定 admin_password。")
-                elif pw and hmac.compare_digest(pw.encode("utf-8"), _cur_pw.encode("utf-8")):
-                    st.session_state["_admin_fail"] = 0
-                    st.session_state.admin_mode = True
-                    st.session_state.page = "admin"
-                    st.rerun()
+                elif str(cap).strip() != str(_ca + _cb):
+                    _new_admin_captcha()  # 換新題，防腳本重放已解出的驗證碼
+                    st.error("驗證碼錯誤，請重新輸入。")
                 else:
-                    # 連錯 5 次鎖 60 秒，拖慢暴力破解（伺服器級限流仍建議另做）
-                    _fail = st.session_state.get("_admin_fail", 0) + 1
-                    st.session_state["_admin_fail"] = _fail
-                    if _fail >= 5:
-                        st.session_state["_admin_lock_until"] = time.time() + 60
+                    _cur_pw = get_admin_password()
+                    if _cur_pw is None:
+                        st.error("⚠️ 資料庫暫時無法連線，請稍後再試。")
+                    elif not _cur_pw:
+                        st.error("尚未設定管理密碼，請於 Secrets 設定 admin_password。")
+                    elif pw and hmac.compare_digest(pw.encode("utf-8"), _cur_pw.encode("utf-8")):
                         st.session_state["_admin_fail"] = 0
-                        st.error("錯誤次數過多，已暫時鎖定 60 秒。")
+                        _new_admin_captcha()  # 登入成功也換題，避免下次沿用舊題
+                        st.session_state.admin_mode = True
+                        st.session_state.page = "admin"
+                        st.rerun()
                     else:
-                        st.error(f"密碼錯誤（剩 {5 - _fail} 次）")
+                        # 固定延遲是主防線；session 級 5 次鎖只是 in-session 加碼（換分頁可繞，故非唯一防線）
+                        _fail = st.session_state.get("_admin_fail", 0) + 1
+                        st.session_state["_admin_fail"] = _fail
+                        _new_admin_captcha()  # 每次密碼錯也換題，逼腳本重解
+                        if _fail >= 5:
+                            st.session_state["_admin_lock_until"] = time.time() + 60
+                            st.session_state["_admin_fail"] = 0
+                            st.error("錯誤次數過多，已暫時鎖定 60 秒。")
+                        else:
+                            st.error(f"密碼錯誤（剩 {5 - _fail} 次）")
 
 # ── Customer: Home ────────────────────────────────────────────────────────────
 def show_home():
