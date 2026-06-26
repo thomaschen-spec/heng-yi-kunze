@@ -470,6 +470,32 @@ def get_my_open_sessions():
     rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
     return rows
 
+def get_my_closed_sessions(limit: int = 20):
+    """目前登入身分（email／line_uid）的『已結案』歷史問卦，最新在前、附訊息，供首頁歷史紀錄唯讀回顧。
+    結案後 localStorage 會被清空，這是顧客唯一能回看舊解卦的入口。DB 異常回 []。"""
+    em = (st.session_state.get("email", "") or "").lower()
+    uid = st.session_state.get("line_uid", "") or ""
+    rows, seen = [], set()
+    for field, val in (("email", em), ("line_uid", uid)):
+        if not val:
+            continue
+        try:
+            data = _get("sessions", {
+                field: _eqv(val),
+                "is_closed": "eq.true",
+                "select": "*,messages(*)",
+                "order": "updated_at.desc",
+                "limit": str(limit),
+            })
+        except Exception:
+            continue
+        for r in _enrich(data):
+            if r["session_id"] not in seen:
+                seen.add(r["session_id"])
+                rows.append(r)
+    rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    return rows[:limit]
+
 def _first_question(sess) -> str:
     """取此問卦的第一則顧客訊息（原始問題）當清單預覽用。"""
     msgs = sorted(sess.get("messages") or [], key=lambda m: m.get("created_at") or "")
@@ -1216,6 +1242,22 @@ localStorage.removeItem('iching_email');
                 st.session_state.selected_cat = cat_name
                 st.session_state.page = "register"
                 st.rerun()
+
+    # 我的歷史紀錄：已結案問卦唯讀回顧。結案會清掉 localStorage，這是顧客回看舊解卦的唯一入口。
+    if _logged_in:
+        _hist = get_my_closed_sessions()
+        if _hist:
+            st.markdown('<hr class="g-div">', unsafe_allow_html=True)
+            with st.expander(f"📜 我的歷史紀錄（已結案 {len(_hist)} 則）", expanded=False):
+                st.caption("點任一則回看當時小老師的解讀（唯讀，不影響進行中的諮詢）。")
+                for _h in _hist:
+                    _cat = _h.get("category", "")
+                    _icon = CATEGORIES.get(_cat, {}).get("icon", "☯")
+                    _q = " ".join(_first_question(_h).split())
+                    _qprev = (_q[:22] + "…") if len(_q) > 22 else (_q or "（無內容）")
+                    if st.button(f"{_icon} {_cat}｜{_qprev}｜{fmt_time(_h.get('updated_at'))}",
+                                 key=f"_home_hist_{_h['session_id']}", use_container_width=True):
+                        _enter_chat(_h)
 
 # ── Customer: Register ────────────────────────────────────────────────────────
 def show_register():
