@@ -444,6 +444,48 @@ def find_my_open_session():
             return s
     return None
 
+def get_my_open_sessions():
+    """目前登入身分（email／line_uid）的『所有』未結案問卦，最新在前、附訊息，
+    供首頁列出讓顧客自己挑任一筆回去（取代舊的只浮最新 1 筆）。
+    找不到／DB 異常回 []（首頁便利功能，DB 抖動時不顯示即可，不影響正確性）。"""
+    em = (st.session_state.get("email", "") or "").lower()
+    uid = st.session_state.get("line_uid", "") or ""
+    rows, seen = [], set()
+    for field, val in (("email", em), ("line_uid", uid)):
+        if not val:
+            continue
+        try:
+            data = _get("sessions", {
+                field: _eqv(val),
+                "is_closed": "eq.false",
+                "select": "*,messages(*)",
+                "order": "updated_at.desc",
+            })
+        except Exception:
+            continue  # 單一身分查詢失敗就略過，另一身分仍可能有資料
+        for r in _enrich(data):
+            if r["session_id"] not in seen:
+                seen.add(r["session_id"])
+                rows.append(r)
+    rows.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    return rows
+
+def _first_question(sess) -> str:
+    """取此問卦的第一則顧客訊息（原始問題）當清單預覽用。"""
+    msgs = sorted(sess.get("messages") or [], key=lambda m: m.get("created_at") or "")
+    for m in msgs:
+        if m.get("role") == "customer":
+            return (m.get("content") or "").strip()
+    return ""
+
+def _enter_chat(sess):
+    """切換到指定問卦的對話頁。供首頁『進行中諮詢』清單各按鈕共用。"""
+    st.session_state.customer_sid = sess["session_id"]
+    st.session_state.customer_name = sess.get("customer_name") or ""
+    st.session_state.customer_category = sess.get("category", "")
+    st.session_state.page = "chat"
+    st.rerun()
+
 def get_session(sid: str):
     try:
         data = _get("sessions", {"session_id": _eqv(sid), "limit": "1"})
@@ -1124,31 +1166,34 @@ localStorage.removeItem('iching_email');
     # ⚠ 診斷面板（含 _db_selftest 寫刪探針＋sessions 筆數）已移至管理後台，僅 admin + ?debug=1 可見。
     #   原本放在顧客首頁，任何人加 ?debug=1 即可觸發未授權洩漏，故移除（2026-06-26 #2 修正）。
 
-    # 進行中諮詢橫幅：已登入／持 token 且有未結案問卦時，停在首頁讓顧客「自己選」回去看回覆，
-    # 取代舊的「自動跳進對話」（會把顧客困在對話、到不了首頁、也不能問新問題）。
-    # token 來的用 customer_sid 直接查；Google／Email 登入的用身分（email/line_uid）查。
-    _resume = None
+    # 進行中諮詢清單：列出此顧客『所有』未結案問卦，讓他自己挑任一筆回去看回覆。
+    # 取代舊的「只浮最新 1 筆」——顧客可同時開多筆（不同主題、甚至同主題多筆），想回哪筆回哪筆。
+    _open_list = get_my_open_sessions()
+    # token 登入的那筆可能沒綁 email/line_uid（不在身分清單裡），補進來、避免漏掉
     _csid = st.session_state.get("customer_sid")
-    if _csid:
+    if _csid and all(s["session_id"] != _csid for s in _open_list):
         _cs = get_session(_csid)
-        if _cs is not _DB_ERROR:
-            if _cs and not _cs.get("is_closed"):
-                _resume = _cs
-            else:
-                st.session_state.customer_sid = None  # 已結案／被刪 → 清掉失效指標
-    if _resume is None:
-        _f = find_my_open_session()
-        if _f and _f is not _DB_ERROR:
-            _resume = _f
-    if _resume:
-        _rcat = _resume.get("category", "")
-        st.info(f"💬 您有一則進行中的諮詢（{_rcat}），小老師的回覆都在裡面。")
+        if _cs and _cs is not _DB_ERROR and not _cs.get("is_closed"):
+            _open_list.insert(0, _enrich([_cs])[0])
+        elif _cs is not _DB_ERROR and (_cs is None or _cs.get("is_closed")):
+            st.session_state.customer_sid = None  # 已結案／被刪 → 清掉失效指標
+    if len(_open_list) == 1:
+        _s = _open_list[0]
+        st.info(f"💬 您有一則進行中的諮詢（{_s.get('category','')}），小老師的回覆都在裡面。")
         if st.button("→ 回到對話查看回覆", key="_home_resume", use_container_width=True):
-            st.session_state.customer_sid = _resume["session_id"]
-            st.session_state.customer_name = _resume.get("customer_name") or ""
-            st.session_state.customer_category = _rcat
-            st.session_state.page = "chat"
-            st.rerun()
+            _enter_chat(_s)
+        st.caption("想問一個全新的問題？也可以直接往下選分區開始。")
+    elif len(_open_list) > 1:
+        st.info(f"💬 您有 {len(_open_list)} 則進行中的諮詢，點任一則回去看回覆：")
+        for _s in _open_list:
+            _cat = _s.get("category", "")
+            _icon = CATEGORIES.get(_cat, {}).get("icon", "☯")
+            _q = " ".join(_first_question(_s).split())  # 壓成單行
+            _qprev = (_q[:22] + "…") if len(_q) > 22 else (_q or "（無內容）")
+            _flag = "✅ 已回覆" if _s.get("last_role") == "consultant" else "⏳ 待回覆"
+            if st.button(f"{_icon} {_cat}｜{_qprev}｜{_flag}",
+                         key=f"_home_open_{_s['session_id']}", use_container_width=True):
+                _enter_chat(_s)
         st.caption("想問一個全新的問題？也可以直接往下選分區開始。")
 
     # 須先登入（Email／Google／LINE）才能問卦——每筆問卦都綁定身分，安全且日後一定查得到。

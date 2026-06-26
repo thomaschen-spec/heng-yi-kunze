@@ -1,0 +1,304 @@
+<!DOCTYPE html><html lang="zh-TW"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>洞察易生的經歷 — 系統說明 · 分區建檔</title>
+<style>
+:root{
+  --ground:#131820; --surface:#1C2433; --surf2:#252E3E; --dim:#2D3A4A;
+  --text:#E8E4DC; --muted:#7A8799;
+  --accent:#E8A44A;
+  --teal:#7EC8C8; --purple:#A78BFA; --green:#6EE7B7; --blue:#93C5FD; --red:#F4978E;
+  --mono:ui-monospace,'Cascadia Code','SF Mono','Consolas',monospace;
+  --sans:system-ui,-apple-system,'Segoe UI','Microsoft JhengHei',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{background:var(--ground);color:var(--text);font-family:var(--sans);
+  font-size:1rem;line-height:1.75;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:920px;margin:0 auto;padding:0 1.5rem;}
+section{padding:4rem 0;}
+section+section{border-top:1px solid var(--dim);}
+.eyebrow{display:block;font-family:var(--mono);font-size:0.68rem;letter-spacing:0.2em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:1.1rem;}
+h1{font-family:var(--mono);font-size:clamp(1.8rem,5vw,2.8rem);font-weight:700;
+  line-height:1.2;letter-spacing:-0.02em;margin-bottom:1rem;}
+.section-h{font-family:var(--mono);font-size:clamp(1.3rem,3.2vw,1.8rem);font-weight:700;
+  line-height:1.25;letter-spacing:-0.015em;margin-bottom:0.8rem;}
+.sub{font-size:1rem;color:var(--muted);max-width:66ch;line-height:1.8;}
+code{font-family:var(--mono);font-size:0.85em;color:var(--teal);
+  background:var(--surf2);padding:0.1em 0.4em;border-radius:4px;}
+strong{color:var(--text);font-weight:600;}
+.acc{color:var(--accent);}
+a{color:var(--teal);text-decoration:none;border-bottom:1px solid var(--dim);}
+a:hover{border-color:var(--teal);}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.1rem;margin-top:2rem;}
+.card{background:var(--surface);border:1px solid var(--dim);border-radius:12px;padding:1.4rem;}
+.card h3{font-family:var(--mono);font-size:1.05rem;color:var(--accent);margin-bottom:0.2rem;}
+.card p{font-size:0.92rem;line-height:1.7;}
+.card ul{margin:0.6rem 0 0 1.1rem;font-size:0.86rem;color:var(--muted);line-height:1.7;}
+table{width:100%;border-collapse:collapse;margin-top:1.8rem;font-size:0.9rem;}
+th,td{text-align:left;padding:0.7rem 0.8rem;border-bottom:1px solid var(--dim);vertical-align:top;}
+th{font-family:var(--mono);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);}
+td .n{font-family:var(--mono);color:var(--accent);font-weight:700;}
+.note{background:var(--surf2);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+  padding:1rem 1.2rem;margin-top:1.6rem;font-size:0.9rem;color:var(--muted);line-height:1.8;}
+.note strong{color:var(--text);}
+.note.red{border-left-color:var(--red);}
+.note.green{border-left-color:var(--green);}
+.diagram{background:var(--surface);border:1px solid var(--dim);border-radius:12px;
+  padding:1.5rem;margin-top:2rem;overflow-x:auto;}
+.toc{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.6rem;margin-top:2rem;}
+.toc a{display:block;background:var(--surface);border:1px solid var(--dim);border-radius:8px;
+  padding:0.7rem 1rem;font-family:var(--mono);font-size:0.82rem;color:var(--text);border-bottom:1px solid var(--dim);}
+.toc a:hover{border-color:var(--accent);color:var(--accent);}
+.pill{display:inline-block;font-family:var(--mono);font-size:0.68rem;padding:0.1em 0.6em;border-radius:99px;
+  border:1px solid var(--dim);color:var(--muted);margin-left:0.4em;vertical-align:middle;}
+.pill.ok{color:var(--green);border-color:var(--green);}
+.pill.todo{color:var(--accent);border-color:var(--accent);}
+footer{padding:3rem 0;color:var(--muted);font-size:0.82rem;font-family:var(--mono);line-height:1.9;border-top:1px solid var(--dim);}
+ul.tight{margin:1rem 0 0 1.2rem;line-height:1.85;}
+ul.tight li{margin-bottom:0.3rem;}
+.kbd{font-family:var(--mono);font-size:0.82em;color:var(--accent);}
+</style>
+</head><body><div class="wrap">
+
+<section id="hero">
+  <span class="eyebrow">系統說明 · 分區建檔 · 2026-06-25</span>
+  <h1>洞察易生的經歷<br><span class="acc">線上問卦系統</span> 全貌</h1>
+  <p class="sub">一份給「之後出問題或要改規格」用的對照手冊。整個系統拆成 10 個區塊：架構、資料表、登入、金鑰與 RLS、通知、後台、設定清單、怎麼改規格、待辦驗收。出狀況時先翻到對應區塊，多半能直接定位。</p>
+  <div class="toc">
+    <a href="#overview">01 · 系統總覽</a>
+    <a href="#arch">02 · 架構與流程</a>
+    <a href="#data">03 · 資料表</a>
+    <a href="#auth">04 · 登入與身分</a>
+    <a href="#keys">05 · 金鑰與 RLS ⚠</a>
+    <a href="#notify">06 · 通知機制</a>
+    <a href="#admin">07 · 後台</a>
+    <a href="#config">08 · 設定清單</a>
+    <a href="#change">09 · 怎麼改規格</a>
+    <a href="#todo">10 · 待辦與驗收</a>
+  </div>
+</section>
+
+<section id="overview">
+  <span class="eyebrow">01 — Overview</span>
+  <h2 class="section-h">系統總覽</h2>
+  <p class="sub">顧客線上選分區、留問題（問卦），小老師在後台逐筆解讀回覆；顧客用 Google／Email 登入，回覆會主動通知。整個 app 是<strong>單一 Python 檔</strong>，資料放 Supabase。</p>
+  <div class="cards">
+    <div class="card">
+      <h3>正式網址</h3>
+      <p><code>iching-insight.streamlit.app</code></p>
+      <ul><li>⚠ 不是 repo 名 heng-yi-kunze</li><li>所有 URL（email 連結／Google redirect／LIFF）都要用這個</li></ul>
+    </div>
+    <div class="card">
+      <h3>技術棧</h3>
+      <p>Streamlit（Python）＋ Supabase（PostgREST）</p>
+      <ul><li>前端＋後端都在 <code>app.py</code> 一檔</li><li>DB 走 <code>requests</code> 直打 PostgREST，不用 supabase-py</li><li>託管：Streamlit Community Cloud</li></ul>
+    </div>
+    <div class="card">
+      <h3>原始碼</h3>
+      <p>GitHub <code>zchen114-vit/heng-yi-kunze</code>（public）</p>
+      <ul><li>master 分支自動觸發 Streamlit 重部署</li><li>密鑰全在 Secrets，不在 repo</li></ul>
+    </div>
+    <div class="card">
+      <h3>六大分區</h3>
+      <p>感情與人際 · 事業與學業 · 財運與財務</p>
+      <ul><li>健康與生活 · 時機與決策 · 綜合命理</li><li>定義在 <code>CATEGORIES</code>（app.py 第 54 行）</li></ul>
+    </div>
+  </div>
+</section>
+
+<section id="arch">
+  <span class="eyebrow">02 — Architecture</span>
+  <h2 class="section-h">架構與一筆問卦的流程</h2>
+  <p class="sub">顧客必須先登入才能問卦（每筆問卦綁定身分，日後一定查得到）。問卦寫入 DB 後，把一支<strong>猜不到的隨機 token</strong> 存進這台裝置的 localStorage 並導向 <code>?token=…</code>，之後回來自動帶出該筆問卦。</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TD
+    A["顧客開站<br/>iching-insight.streamlit.app"] --> B{已登入?}
+    B -- 否 --> L["Google / Email / LINE 登入"]
+    L --> B
+    B -- 是 --> C["選分區 → 填姓名+問題"]
+    C --> D["create_session()<br/>寫 sessions 列 + 隨機 token"]
+    D --> E["add_message()<br/>寫第一則 customer 訊息"]
+    E --> F["localStorage 存 token<br/>導向 ?token=XXX"]
+    F --> G["顧客進聊天室等回覆<br/>(每 20 秒自動刷新)"]
+    D -. LINE 推播 .-> H["小老師收通知"]
+    H --> I["後台逐筆解讀回覆<br/>add_message consultant"]
+    I -. email/LINE .-> J["顧客收回覆通知<br/>點連結用 ?token= 回登"]
+    </pre>
+  </div>
+  <div class="note">
+    <strong>關鍵設計：身分只認 token。</strong>網址 <code>?token=</code> 是唯一安全的「回來查看」入口；舊版的 <code>?email=</code>／<code>?sid=</code>／<code>?line_uid=</code> 已移除——那些可被任何人手打網址偽造成別人身分（曾是帳號接管漏洞）。token 由 <code>secrets.token_urlsafe(32)</code> 產生，猜不到。
+  </div>
+</section>
+
+<section id="data">
+  <span class="eyebrow">03 — Data Model</span>
+  <h2 class="section-h">資料表（Supabase）</h2>
+  <p class="sub">四張表。<code>sessions</code>＝一筆問卦、<code>messages</code>＝對話訊息、<code>config</code>＝管理密碼、<code>settings</code>＝公告與通知錯誤記錄。</p>
+  <table>
+    <thead><tr><th>表</th><th>主要欄位</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>sessions</code></td><td><code>session_id</code>(8碼)、<code>customer_name</code>、<code>category</code>、<code>token</code>、<code>email</code>、<code>line_uid</code>、<code>is_closed</code>(預設 false)、<code>created_at</code>、<code>updated_at</code>、<code>preference</code>(廢欄留空)</td><td>一筆問卦。<code>is_closed=false</code>＝進行中、後台會撈；<code>true</code>＝歸檔。</td></tr>
+      <tr><td><code>messages</code></td><td><code>session_id</code>、<code>role</code>(customer／consultant)、<code>content</code>、<code>created_at</code></td><td>對話訊息。<code>role</code> 決定氣泡是顧客還是小老師。</td></tr>
+      <tr><td><code>config</code></td><td><code>key</code>、<code>value</code></td><td><span class="pill todo">已停用</span>原本存 <code>admin_password</code>；後台 2026-06-26 改 Google 白名單後此表不再使用（可留著不影響）。</td></tr>
+      <tr><td><code>settings</code></td><td><code>key</code>、<code>value</code></td><td><code>announcement</code>(跑馬燈)、<code>last_notify_error</code>(最近通知失敗原因)。</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>欄位是逐步加上去的，靠 migration。</strong>repo <code>supabase/migrations/</code> 下：<code>20260623_add_email_and_line_uid.sql</code>（加 email／line_uid）、<code>20260624_add_session_token.sql</code>（加 token＋index，<span class="pill ok">已跑</span> 2026-06-25）。新增欄位時務必同步寫一支 migration 並在 Supabase SQL Editor 跑過。
+  </div>
+</section>
+
+<section id="auth">
+  <span class="eyebrow">04 — Auth</span>
+  <h2 class="section-h">登入與身分</h2>
+  <p class="sub">三種登入並存，都接到同一套 email／line_uid 身分機制；登入後若已有進行中問卦會自動帶回。</p>
+  <div class="cards">
+    <div class="card">
+      <h3>Google 登入 <span class="pill ok">通</span></h3>
+      <p>Streamlit 原生 OIDC（<code>st.login</code>／<code>st.user</code>）</p>
+      <ul><li>需 Secrets <code>[auth]</code> 區塊 + <code>httpx</code> 套件</li><li>redirect_uri 兩邊（Google Console＋Secrets）必須一字不差</li></ul>
+    </div>
+    <div class="card">
+      <h3>Email 登入</h3>
+      <p>寄 6 位驗證碼（10 分有效、5 次上限）</p>
+      <ul><li>用 Gmail SMTP 寄信（<code>email_from</code>＋<code>gmail_app_password</code>）</li><li>驗證通過 → 記住 email、找進行中問卦</li></ul>
+    </div>
+    <div class="card">
+      <h3>LINE / LIFF</h3>
+      <p>LINE 內開啟免密碼自動登入</p>
+      <ul><li>需 <code>liff_id</code>＋圖文選單設定</li><li>目前次要，Google／Email 為主</li></ul>
+    </div>
+    <div class="card">
+      <h3>token 自動回登</h3>
+      <p>裝置 localStorage 存 <code>iching_token</code></p>
+      <ul><li>下次帶 <code>?token=</code> 自動進該筆問卦</li><li>結案／刪除後 token 失效</li></ul>
+    </div>
+  </div>
+</section>
+
+<section id="keys">
+  <span class="eyebrow">05 — Keys &amp; RLS</span>
+  <h2 class="section-h">金鑰與 RLS ⚠ <span class="pill todo">最容易踩雷</span></h2>
+  <p class="sub">app 用 <code>supabase_key</code> 直打 PostgREST。這把金鑰是 <strong>service_role（secret）</strong> 還是 <strong>publishable（anon）</strong>，決定 RLS 管不管它——這是 2026-06-25 那場「寫得進、讀不回」的根因。</p>
+  <table>
+    <thead><tr><th>金鑰</th><th>新版名稱</th><th>受 RLS 管?</th><th>該放哪</th></tr></thead>
+    <tbody>
+      <tr><td>service_role</td><td><code>sb_secret_…</code>（Secret key）</td><td><strong class="acc">否，繞過 RLS</strong></td><td>✅ 本系統用這把（只放 Streamlit Secrets）</td></tr>
+      <tr><td>anon</td><td><code>sb_publishable_…</code></td><td>是，遵守 RLS</td><td>給瀏覽器端用；本系統<strong>不該</strong>用它當 <code>supabase_key</code></td></tr>
+    </tbody>
+  </table>
+  <div class="note red">
+    <strong>2026-06-25 故障紀錄（顧客「找不到此諮詢記錄」＋後台點不進）— 兩個原因疊在一起：</strong><br>
+    <strong>① 金鑰：</strong><code>supabase_key</code> 一度放成 <strong>publishable</strong>（受 RLS 管）→ 已換成 <strong>secret／service_role</strong>（<code>sb_secret_…</code>，繞過 RLS）。<span class="pill ok">已修</span><br>
+    <strong>② 真兇＝<code>_eqv()</code> 雙引號：</strong>防注入用的 <code>_eqv()</code> 把查詢值包成 <code>eq."值"</code>，但這套 PostgREST <strong>不會剝掉雙引號</strong> → 拿含引號的 <code>"值"</code> 比對 → 單筆等值查詢永遠對不到。列表查詢沒走 <code>_eqv</code>（用不加引號的 <code>is_closed=eq.false</code>）所以讀得到——正好造成「<strong>列表看得到、用 ID 撈單筆就找不到</strong>」。<span class="pill ok">已修</span>（改成白名單清洗＋不加引號，commit <code>27ab225</code>）。<br>
+    <strong>⚠ 別把 <code>_eqv</code> 改回 <code>eq."值"</code></strong>——這套 PostgREST 不剝引號，會讓所有單筆查詢全部讀不到。<br>
+    <strong>判別工具：</strong><code>?debug=1</code> →「🔧 DB 自我測試」會印金鑰類型＋「加引號 vs 不加引號」兩種讀回，一翻兩瞪眼。
+  </div>
+  <div class="note">
+    <strong>為什麼用 service_role 是對的？</strong>這把金鑰只待在 Streamlit 伺服器、<strong>永不送進瀏覽器</strong>，所有身分驗證（Google／驗證碼／token）都在伺服器端做完才碰 DB。這就是「可信後端」該有的樣子。前提：絕不可把它寫進程式碼或前端 JS。
+  </div>
+</section>
+
+<section id="notify">
+  <span class="eyebrow">06 — Notifications</span>
+  <h2 class="section-h">通知機制</h2>
+  <table>
+    <thead><tr><th>事件</th><th>通知誰</th><th>管道</th></tr></thead>
+    <tbody>
+      <tr><td>顧客新問卦／追問</td><td>小老師</td><td>LINE 推播（<code>line_token</code>＋<code>line_user_id</code>）；失敗原因寫進 <code>settings.last_notify_error</code>，後台看得到</td></tr>
+      <tr><td>小老師回覆</td><td>顧客</td><td>Email（有 email 才寄，附 <code>?token=</code> 回登連結）＋ LINE 推播（有 line_uid 才推）</td></tr>
+    </tbody>
+  </table>
+  <div class="note">寄信走 <strong>Gmail SMTP</strong>（不是第三方 API），用 <code>email_from</code> 這個 Gmail 帳號 + 16 碼應用程式密碼 <code>gmail_app_password</code>。自家 Gmail 第一封常被分到垃圾匣，驗收時記得翻。</div>
+</section>
+
+<section id="admin">
+  <span class="eyebrow">07 — Admin</span>
+  <h2 class="section-h">後台（小老師專用）</h2>
+  <p class="sub">從側邊欄「🔐 管理入口」用 Google 帳號登入進入（<strong>不再用密碼</strong>）。可看進行中問卦清單、逐筆回覆、結案、歸檔、設公告、測 LINE 通知。</p>
+  <ul class="tight">
+    <li><strong>授權＝Google 信箱白名單</strong> <span class="pill ok">2026-06-26 改</span>：登入的 Google email 要在 Secrets <code>admin_emails</code>（逗號分隔可多人）裡，才進得了後台。<strong>沒有密碼可被暴力破解</strong>，MFA／帳號安全／登入限流全交給 Google。要增減管理員 → 改 <code>admin_emails</code>。舊的「密碼登入＋算術驗證碼＋改密碼面板」都已移除。</li>
+    <li><strong>清單刷新</strong>：儀表板每 30 秒自動重抓＋有「🔄 重新整理」鈕（<span class="pill ok">2026-06-25 加</span>，修「切過去看停在舊清單」）。</li>
+    <li><strong>狀態</strong>：🔴 待解讀（最後一則是顧客或還沒提問）／✅ 已解讀（最後一則是小老師）。</li>
+    <li><strong>篩選</strong>：分區、狀態、姓名搜尋、姓氏分組。預設「全部／全部」。</li>
+  </ul>
+  <div class="note">
+    <strong>右下角的「Manage app」按鈕＝Streamlit Cloud 平台的，不是本 app 的功能，也跟後台 admin 登入無關。</strong>
+    它由 <strong>Streamlit Cloud 帳號</strong>把關——只有「登入 share.streamlit.io 且是本 app 擁有者」的你點得動（看 log／Secrets／重啟）。
+    <strong>一般訪客就算看到、用 F12 叫出來也管不了、看不到 Secrets</strong>，會被平台登入擋住。
+    你登出 app 後台還看得到它，是因為瀏覽器仍登著 Streamlit Cloud（屋主身分）＝<strong>預期行為，不是漏洞</strong>；想看「別人看到的樣子」開無痕視窗即可。
+    app 第 794–802 行有 CSS 對非 admin 把它藏起來，但那<strong>只是化妝</strong>（懂的人 F12 能叫回來），真正的牆是平台登入。
+  </div>
+</section>
+
+<section id="config">
+  <span class="eyebrow">08 — Config</span>
+  <h2 class="section-h">設定清單（換環境／重建時照這張對）</h2>
+  <h3 style="font-family:var(--mono);color:var(--accent);margin-top:1.5rem;font-size:1rem;">Streamlit Secrets</h3>
+  <table>
+    <thead><tr><th>Key</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td><code>supabase_url</code></td><td>Supabase 專案 URL</td></tr>
+      <tr><td><code>supabase_key</code></td><td><strong class="acc">secret／service_role 金鑰</strong>（見區塊 05，別放 publishable）</td></tr>
+      <tr><td><code>[auth]</code> 區塊</td><td>Google OIDC：<code>redirect_uri</code>／<code>cookie_secret</code>／<code>client_id</code>／<code>client_secret</code>／<code>server_metadata_url</code>。此區塊要放 Secrets 最下面。</td></tr>
+      <tr><td><code>email_from</code> / <code>gmail_app_password</code></td><td>寄信用 Gmail 帳號＋16 碼應用程式密碼</td></tr>
+      <tr><td><code>line_token</code> / <code>line_user_id</code></td><td>LINE Bot 推播給小老師</td></tr>
+      <tr><td><code>liff_id</code></td><td>LINE 內免密碼登入（選用）</td></tr>
+      <tr><td><code>admin_emails</code></td><td><strong class="acc">後台管理員白名單</strong>（逗號分隔多個 Google email）。後台登入＝這份白名單，<strong>已取代密碼</strong>。沒設＝自己也進不了後台。舊的 <code>admin_password</code> 不再使用、可移除。</td></tr>
+      <tr><td><code>app_url</code></td><td>選填，預設已是正式網址</td></tr>
+    </tbody>
+  </table>
+  <h3 style="font-family:var(--mono);color:var(--accent);margin-top:2rem;font-size:1rem;">外部設定</h3>
+  <ul class="tight">
+    <li><strong>Google Cloud Console</strong>：OAuth client 的 Authorized redirect URIs ＝ <code>https://iching-insight.streamlit.app/oauth2callback</code>（一字不差）；OAuth consent screen 建議 Publish。</li>
+    <li><strong>Supabase</strong>：四張表存在；migration 跑過；RLS 已開（對外擋）；app 用 service_role 金鑰繞過。</li>
+  </ul>
+</section>
+
+<section id="change">
+  <span class="eyebrow">09 — How to Change</span>
+  <h2 class="section-h">怎麼改規格（常見修改點）</h2>
+  <table>
+    <thead><tr><th>想改什麼</th><th>動哪裡</th></tr></thead>
+    <tbody>
+      <tr><td>新增／改分區</td><td><code>CATEGORIES</code>（app.py 第 54 行）：加一筆，含 icon／desc／welcome。前台卡片、後台篩選自動跟著變。</td></tr>
+      <tr><td>加 sessions 欄位</td><td>① 寫 migration 放 <code>supabase/migrations/</code> 並在 Supabase 跑 ② <code>create_session()</code> 加進 payload ③ 後台顯示處取用。</td></tr>
+      <tr><td>改回覆通知內容</td><td>email：<code>notify_customer_reply_email()</code>；LINE：<code>notify_customer_reply_line()</code>。</td></tr>
+      <tr><td>改後台清單／篩選</td><td><code>show_admin()</code>（清單卡片、刷新、篩選）＋ <code>get_all_sessions()</code>（查詢條件）。</td></tr>
+      <tr><td>改首頁文案／登入區</td><td><code>show_home()</code>。（診斷面板已移到後台 <code>show_admin()</code>，見下。）</td></tr>
+      <tr><td>查線上 DB 狀態</td><td><strong>先登入後台</strong>，再於網址加 <code>?debug=1</code> → 儀表板出現「🔧 系統診斷」（金鑰角色＋讀寫往返）。<span class="pill ok">2026-06-26 改為僅 admin 可見</span>（原本任何人加參數就觸發＝洩漏）。</td></tr>
+    </tbody>
+  </table>
+  <div class="note green">
+    <strong>改完上線流程：</strong>本機 <code>python -m py_compile app.py</code> 過 → <code>git commit</code> + <code>git push origin master</code> → Streamlit 自動重部署（1–2 分鐘）→ 開 <code>?debug=1</code> 確認新程式已上線（看得到診斷行＝新版）。
+  </div>
+</section>
+
+<section id="todo">
+  <span class="eyebrow">10 — Status</span>
+  <h2 class="section-h">目前待辦與驗收清單</h2>
+  <ul class="tight">
+    <li><span class="pill ok">已完成</span> <strong>「找不到此諮詢記錄」雙修</strong>：① <code>supabase_key</code> 換 secret／service_role（繞 RLS）② <code>_eqv()</code> 改白名單清洗、不加引號（單筆等值查詢才撈得到，commit <code>27ab225</code>）。兩者缺一不可。</li>
+    <li><span class="pill ok">已完成</span> Supabase token 欄 migration、Google 登入、後台自動刷新、<code>?debug=1</code> DB 自我測試。</li>
+    <li><span class="pill ok">已完成</span> <strong>2026-06-26 資安強化（4 修）</strong>：① <code>_eqv</code> 白名單補 <code>%</code>（含 % 的 email 單筆查得到）② <code>?debug=1</code> 診斷收斂為「僅後台 admin」可見（原本任何人加參數就洩 session 筆數＋寫刪探針）③ 後台改 Google 信箱白名單、拔掉可暴力破解的密碼 ④ <code>create_session</code> 退路保留 email／line_uid，不再建「查無身分」的孤兒問卦。</li>
+    <li><span class="pill ok">設計如此</span> <strong>問卦數量＝不設上限</strong>：一個顧客想問幾筆就幾筆、同主題也可問多筆，<strong>不會被擋</strong>（唯一節流是「同 email 寄驗證碼有 10 秒間隔＋每日上限」，那是防濫發信、非防問卦）。⚠ 但 app 介面的「進行中諮詢」橫幅＋裝置自動回登只會帶回<strong>最新 1 筆</strong>未結案；較舊的未結案要靠小老師回覆 email 裡的 <code>?token=</code> 連結回去（每筆各自一把 token）。若要讓顧客在站內直接挑任一筆回去，需再加「我的進行中諮詢清單」（尚未做）。</li>
+    <li><span class="pill todo">待驗收</span> 無痕跑完整一輪：① email 登入 ② 問卦進得到聊天室、看到自己的問題 ③ 後台看得到、點得進、回得了 ④ 顧客收到回覆通知 email ⑤ 關分頁再開用 token 自動回登。</li>
+  </ul>
+  <div class="note">這份是「人看的對照手冊」；Claude 端的速記在記憶庫 <code>project_grr_bugfix_progress.md</code>，兩者分工，不重複。改規格或出新問題時，先翻對應區塊。</div>
+</section>
+
+<footer>
+  洞察易生的經歷 · 系統說明 · 2026-06-25<br>
+  iching-insight.streamlit.app · repo: zchen114-vit/heng-yi-kunze<br>
+  房子風格 · Claude Lab Journal house-style
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true,theme:'dark',themeVariables:{
+  fontSize:'18px',
+  primaryColor:'#252E3E',primaryTextColor:'#E8E4DC',primaryBorderColor:'#E8A44A',
+  lineColor:'#7A8799',fontFamily:'ui-monospace,Consolas,monospace',
+  clusterBkg:'#1C2433',clusterBorder:'#2D3A4A'}});</script>
+</div></body></html>
