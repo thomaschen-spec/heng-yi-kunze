@@ -26,7 +26,6 @@ st.set_page_config(
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-_LIFF_ID = st.secrets.get("liff_id", "")  # LINE LIFF App ID; 空字串時整段 LIFF 功能停用
 _APP_URL = st.secrets.get("app_url", "https://iching-insight.streamlit.app").rstrip("/")
 def _email_enabled() -> bool:
     return bool(st.secrets.get("email_from", "") and st.secrets.get("gmail_app_password", ""))
@@ -321,12 +320,8 @@ def _db_selftest():
     return " · ".join(out)
 
 def _render_debug_panel():
-    """診斷面板（LIFF／Google／DB 自我測試）。⚠ 僅限 admin：_db_selftest 會洩漏 sessions 筆數
+    """診斷面板（Google／DB 自我測試）。⚠ 僅限 admin：_db_selftest 會洩漏 sessions 筆數
     且每次都對 DB 做寫入+刪除探針，故只在管理後台 + ?debug=1 時呼叫，不可放在顧客可見頁面。"""
-    st.caption(
-        f"🔧 LIFF 診斷 — liff_id: {'✓ 已設定（LIFF 啟用）' if _LIFF_ID else '✗ 缺（LIFF 停用）'}、"
-        f"目前 line_uid: {st.session_state.line_uid or '（無 — 非 LINE 內開啟或尚未自動登入）'}。"
-    )
     st.caption(
         f"🔧 Google 診斷 — [auth] 區塊: {'✓ 已讀到（按鈕應顯示）' if _google_enabled() else '✗ 沒讀到（Secrets 沒有 [auth]／格式錯／app 還沒重啟）'}、"
         f"redirect_uri: {st.secrets.get('auth', {}).get('redirect_uri', '（未設定）') if _google_enabled() else '—'}、"
@@ -368,7 +363,8 @@ def create_session(name: str, category: str, line_uid: str = "", email: str = ""
             _post("sessions", fallback)
             return sid, ""  # 無 token：本次仍可問卦，只是這台裝置日後無法用 token 自動回登
         except Exception as e:
-            st.error(f"建立諮詢失敗：{e}")
+            print(f"[create_session] {e}")  # 細節只進後端 log，不回顯給顧客
+            st.error("建立諮詢失敗，請稍後再試。")
             return None, None
 
 def get_session_by_token(token: str):
@@ -527,14 +523,16 @@ def add_message(sid: str, role: str, content: str) -> bool:
                {"session_id": _eqv(sid)})
         return True
     except Exception as e:
-        st.error(f"訊息儲存失敗：{e}")
+        print(f"[add_message] {e}")
+        st.error("訊息儲存失敗，請稍後再試。")
         return False
 
 def get_messages(sid: str):
     try:
         return _get("messages", {"session_id": _eqv(sid), "order": "created_at.asc"})
     except Exception as e:
-        st.error(f"⚠️ 載入訊息失敗：{e}")
+        print(f"[get_messages] {e}")
+        st.error("⚠️ 載入訊息失敗，請稍後再試。")
         return None  # None = DB error, [] = genuinely no messages
 
 def get_all_sessions(cat_f=None, status_f=None):
@@ -553,7 +551,8 @@ def get_all_sessions(cat_f=None, status_f=None):
             rows = [s for s in rows if s["last_role"] == "consultant"]
         return rows
     except Exception as e:
-        st.error(f"⚠️ 載入問卦記錄失敗：{e}")
+        print(f"[get_all_sessions] {e}")
+        st.error("⚠️ 載入問卦記錄失敗，請稍後再試。")
         return None  # None = DB error, [] = genuinely empty
 
 def get_archived_sessions():
@@ -565,9 +564,14 @@ def get_archived_sessions():
         }
         return _enrich(_get("sessions", params))
     except Exception as e:
-        st.error(f"⚠️ 載入歸檔記錄失敗：{e}")
+        print(f"[get_archived_sessions] {e}")
+        st.error("⚠️ 載入歸檔記錄失敗，請稍後再試。")
         return None  # None = DB error, [] = genuinely empty
 
+# ⚠ 授權說明：以下變更類函式（close_session／reopen_session／delete_session／set_announcement／
+#   set_setting）本身不檢查身分，全靠「只有管理後台 UI（進入 admin_mode 後）才呼叫得到」把關。
+#   admin_mode 全檔僅在 Google 白名單 gate 內設為 True、無其他入口（無後門）。
+#   ⚠ 未來新增程式碼時，務必不要在未經 admin gate 的路徑呼叫這些函式，否則等於開洞。
 def close_session(sid: str) -> bool:
     try:
         _patch("sessions", {
@@ -576,7 +580,8 @@ def close_session(sid: str) -> bool:
         }, {"session_id": _eqv(sid)})
         return True
     except Exception as e:
-        st.error(f"結案失敗：{e}")
+        print(f"[close_session] {e}")
+        st.error("結案失敗，請稍後再試。")
         return False
 
 def reopen_session(sid: str) -> bool:
@@ -589,7 +594,8 @@ def reopen_session(sid: str) -> bool:
         }, {"session_id": _eqv(sid)})
         return True
     except Exception as e:
-        st.error(f"重新開啟失敗：{e}")
+        print(f"[reopen_session] {e}")
+        st.error("重新開啟失敗，請稍後再試。")
         return False
 
 def delete_session(sid: str) -> bool:
@@ -598,7 +604,8 @@ def delete_session(sid: str) -> bool:
         _delete("sessions", {"session_id": _eqv(sid)})
         return True
     except Exception as e:
-        st.error(f"刪除失敗：{e}")
+        print(f"[delete_session] {e}")
+        st.error("刪除失敗，請稍後再試。")
         return False
 
 def get_announcement() -> str:
@@ -619,7 +626,8 @@ def set_announcement(text: str) -> bool:
         r.raise_for_status()
         return True
     except Exception as e:
-        st.error(f"儲存失敗：{e}")
+        print(f"[set_announcement] {e}")
+        st.error("儲存失敗，請稍後再試。")
         return False
 
 def get_setting(key: str) -> str:
@@ -693,7 +701,8 @@ def get_stats():
             "replied": sum(1 for s in rows if s["last_role"] == "consultant"),
         }
     except Exception as e:
-        st.warning(f"⚠️ 資料庫連線異常：{e}")
+        print(f"[get_stats] {e}")
+        st.warning("⚠️ 資料庫連線異常，請稍後重試。")
         return {"total": 0, "today": 0, "pending": 0, "replied": 0}
 
 @st.cache_data(ttl=300)
@@ -793,25 +802,6 @@ def notify_customer_reply_email(sid: str) -> None:
         f"開啟連結即可免密碼登入。洞察易生的經歷</p>",
     )
 
-def notify_customer_reply_line(sess) -> None:
-    """顧客若是透過 LINE 登入（留有 line_uid），小老師回覆後推播通知到他的 LINE。
-    補上原本只寄 email、LINE 顧客收不到回覆通知的缺口。best-effort，失敗靜默、不影響回覆流程。"""
-    token = st.secrets.get("line_token", "")
-    uid = (sess.get("line_uid") or "").strip() if sess else ""
-    if not token or not uid:
-        return
-    cat = sess.get("category", "")
-    text = f"小老師回覆了您的問卦（{cat}），請回到網頁查看：\n{_APP_URL}"
-    try:
-        _req.post(
-            "https://api.line.me/v2/bot/message/push",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"to": uid, "messages": [{"type": "text", "text": text}]},
-            timeout=8,
-        )
-    except Exception as e:
-        print(f"[notify_customer_reply_line] {e}")
-
 # ── Session State Init ────────────────────────────────────────────────────────
 def init_state():
     defaults = {
@@ -842,6 +832,14 @@ def init_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+    # 把已驗證的 Google 身分「提早」寫進 session_state。側邊欄（含字體偏好）在 show_home 之前
+    # 就渲染；若等到 show_home 才設 email，重新整理後側欄拿不到身分 → 存好的字體偏好讀不回
+    # （就是「登入後選特大、重整就跑掉」的根因）。OAuth callback 進行中 is_logged_in 仍為 False，不會誤觸。
+    if _google_enabled() and getattr(st.user, "is_logged_in", False):
+        _gem = (getattr(st.user, "email", "") or "").strip().lower()
+        if _gem and _valid_email(_gem):
+            st.session_state.email = _gem
 
     params = st.query_params
     # OAuth 登入 callback 進行中（網址帶 code/state）時，不要動 query params，
@@ -1341,11 +1339,7 @@ def show_register():
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
     st.markdown(f'<div class="info-box">{info["welcome"]}</div>', unsafe_allow_html=True)
 
-    _via_line = bool(st.session_state.line_uid)
-    _via_email = bool(st.session_state.email)
-    if _via_line:
-        st.caption("✅ 您已透過 LINE 登入，日後可直接從 LINE 選單回來查看回覆。")
-    elif _via_email:
+    if st.session_state.email:
         st.caption(f"✅ 您已用 Email（{st.session_state.email}）登入，小老師回覆時會寄信通知您，日後回來免再輸入。")
 
     # 待修一：若此顧客已有一則進行中（未結案）的諮詢，提供入口直接切回該對話聊天室，
@@ -1434,8 +1428,8 @@ def show_chat():
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
-<div class="chat-hdr-title">{category}</div>
-<div class="chat-hdr-sub">{info["desc"]} · 編號：{sid}</div>
+<div class="chat-hdr-title">{_html.escape(category)}</div>
+<div class="chat-hdr-sub">{info["desc"]} · 編號：{_html.escape(sid)}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
@@ -1622,17 +1616,19 @@ def show_admin():
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
         name_esc = _html.escape(s["customer_name"] or "（未知）")
         preview_esc = _html.escape(preview)
+        cat_esc = _html.escape(s["category"] or "")
+        sid_esc = _html.escape(s["session_id"] or "")
 
         ci, cb = st.columns([4, 1])
         with ci:
             st.markdown(f"""<div class="sess-card {css_cls}">
 <div>
   <span class="sess-name">{name_esc}</span>
-  <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {s['category']}</span>
+  <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {cat_esc}</span>
   {status_html}
 </div>
 <div class="sess-meta">
-  編號：{s['session_id']} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
+  編號：{sid_esc} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
 <div class="sess-preview">💬 {preview_esc}</div>
 </div>""", unsafe_allow_html=True)
@@ -1697,13 +1693,12 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
     email_val = (sess.get("email") or "").strip()
     email_esc = _html.escape(email_val)
     email_display = f'<span style="font-family:monospace;background:#2D3B2A;color:#A0C870;padding:2px 8px;border-radius:4px;">{email_esc}</span>' if email_val else '<span style="color:#B8A070;font-style:italic;">（非 Email 登入）</span>'
-    line_display = '<span style="color:#A0C870;">✓ 是</span>' if (sess.get("line_uid") or "").strip() else '<span style="color:#B8A070;font-style:italic;">否</span>'
     st.markdown(f"""<div class="chat-hdr">
 <span style="font-size:2rem;">{info["icon"]}</span>
 <span>
-<div class="chat-hdr-title">{cname_esc} · {category}</div>
-<div class="chat-hdr-sub">編號：{sid} · 建立：{fmt_time(sess['created_at'])}</div>
-<div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}　·　💬 LINE 登入：{line_display}</div>
+<div class="chat-hdr-title">{cname_esc} · {_html.escape(category)}</div>
+<div class="chat-hdr-sub">編號：{_html.escape(sid)} · 建立：{fmt_time(sess['created_at'])}</div>
+<div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}</div>
 </span>
 </div>""", unsafe_allow_html=True)
 
@@ -1803,7 +1798,6 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
             if reply.strip():
                 if add_message(sid, "consultant", reply.strip()):
                     notify_customer_reply_email(sid)
-                    notify_customer_reply_line(sess)
                     st.session_state["_clear_reply_draft"] = sid
                     st.session_state.reply_ver += 1
                     st.rerun()
@@ -1900,17 +1894,19 @@ def show_admin_archive():
         preview = preview[:60] + ("…" if len(preview) > 60 else "")
         name_esc = _html.escape(s["customer_name"] or "（未知）")
         preview_esc = _html.escape(preview)
+        cat_esc = _html.escape(s["category"] or "")
+        sid_esc = _html.escape(s["session_id"] or "")
 
         ci, cb1, cb2 = st.columns([4, 1, 1])
         with ci:
             st.markdown(f"""<div class="sess-card replied">
 <div>
   <span class="sess-name">{name_esc}</span>
-  <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {s['category']}</span>
+  <span style="font-size:0.8rem;color:#7A5C3A;margin-left:8px;">{cat_icon} {cat_esc}</span>
   <span class="badge badge-green">🗄️ 已歸檔</span>
 </div>
 <div class="sess-meta">
-  編號：{s['session_id']} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
+  編號：{sid_esc} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
 </div>
 <div class="sess-preview">💬 {preview_esc}</div>
 </div>""", unsafe_allow_html=True)
