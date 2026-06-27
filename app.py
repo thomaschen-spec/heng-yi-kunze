@@ -650,6 +650,34 @@ def set_setting(key: str, value: str) -> bool:
     except Exception:
         return False
 
+
+def _render_donate():
+    """結案後的『斗內罐』：感謝語＋收款連結（後台「斗內設定」可編輯）。
+    錢直接進小老師帳戶，App 不經手金流；沒設任何有效連結就整段不顯示。
+    只接受 http(s) 連結，避免 link_button 吃到壞值。"""
+    btns = []
+    _lp = get_setting("donate_linepay").strip()
+    _jk = get_setting("donate_jko").strip()
+    if _lp.startswith(("http://", "https://")):
+        btns.append(("💚 用 LINE Pay 贊助", _lp))
+    if _jk.startswith(("http://", "https://")):
+        btns.append(("🧡 用街口支付贊助", _jk))
+    if not btns:
+        return
+    note = get_setting("donate_note").strip() or (
+        "如果今天的解卦幫上了你，歡迎請小老師喝杯咖啡 ☕\n"
+        "你的支持，是這個免費服務能一直走下去的力量 🙏"
+    )
+    st.markdown("---")
+    st.markdown(f"""<div style="background:#2D2440;border:1px solid #6B5BA0;border-radius:10px;
+padding:14px 16px;margin:6px 0;">
+<div style="color:#C8B0F0;font-weight:700;font-size:1rem;margin-bottom:6px;">🧧 小小心意</div>
+<div style="color:#D8D0E8;font-size:0.92rem;line-height:1.75;white-space:pre-wrap;">{_html.escape(note)}</div>
+</div>""", unsafe_allow_html=True)
+    cols = st.columns(len(btns))
+    for c, (label, url) in zip(cols, btns):
+        c.link_button(label, url, use_container_width=True)
+
 # ── Email 驗證碼防濫發（跨 session，存 settings 表）──────────────────────────────
 # session 冷卻只擋同一分頁重複點；攻擊者換分頁就能對受害者信箱連續寄信轟炸。
 # 這裡用伺服器端「同信箱冷卻 + 每日上限」補上。DB 異常時 fail-open（不擋正常使用者）。
@@ -930,6 +958,23 @@ with st.sidebar:
                         st.success("已清除")
                         st.rerun()
 
+        with st.expander("🧧 斗內（贊助）設定"):
+            st.caption("結案頁會顯示這些收款連結讓顧客自由贊助；錢直接進你帳戶，App 不經手金流。留空＝不顯示。")
+            _lp_in = st.text_input("LINE Pay 收款連結", value=get_setting("donate_linepay"),
+                                   placeholder="https://…（LINE Pay 個人收款連結）", key="donate_lp")
+            _jk_in = st.text_input("街口支付收款連結（選填）", value=get_setting("donate_jko"),
+                                   placeholder="https://…", key="donate_jk")
+            _dn_in = st.text_area("感謝語（選填，留空用預設）", value=get_setting("donate_note"),
+                                  height=70, key="donate_note_in")
+            if st.button("儲存斗內設定", use_container_width=True, key="donate_save"):
+                if (set_setting("donate_linepay", _lp_in.strip())
+                        and set_setting("donate_jko", _jk_in.strip())
+                        and set_setting("donate_note", _dn_in.strip())):
+                    st.success("已更新")
+                    st.rerun()
+                else:
+                    st.error("儲存失敗，請稍後再試。")
+
         with st.expander("💬 LINE 通知設定"):
             token = st.secrets.get("line_token", "")
             user_id = st.secrets.get("line_user_id", "")
@@ -1001,14 +1046,15 @@ with st.sidebar:
             if set_setting("font_pref_" + _identity, _font):
                 st.session_state["_font_saved_val"] = _font
 
-        _font_sz = {"大": "1.18rem", "特大": "1.42rem"}.get(_font)
-        if _font_sz:
+        _scale = {"大": "118%", "特大": "142%"}.get(_font)
+        if _scale:
+            # 放大 html 根字級的百分比，讓所有用 rem 的文字（標題／欄位標籤／輸入框／
+            # 提示框／caption／expander 標題…）一起等比放大，而非只挑 p/li/button 幾種
+            # （先前「特大不是每個字都變大」的根因＝只列舉了少數元素）。
             st.markdown(f"""<style>
-[data-testid="stAppViewContainer"] p,
-[data-testid="stAppViewContainer"] li,
-[data-testid="stAppViewContainer"] .stMarkdown,
-[data-testid="stChatMessage"] p,
-.stButton button {{ font-size: {_font_sz} !important; line-height: 1.8 !important; }}
+html {{ font-size: {_scale} !important; }}
+[data-testid="stAppViewContainer"], [data-testid="stSidebar"] {{ line-height: 1.7 !important; }}
+input, textarea, button, select {{ font-size: 1rem !important; }}
 </style>""", unsafe_allow_html=True)
         st.markdown("---")
 
@@ -1117,6 +1163,7 @@ localStorage.removeItem('iching_email');
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
     if _self_closed:
         st.success("🙏 感謝您的諮詢！若有新的問題，歡迎重新選擇分區問卦。")
+        _render_donate()   # 自行結案後的抖內罐
     elif _show_clear and not _quiet_clear:
         st.info("您之前的諮詢已結案。如需繼續，請重新選擇分區問卦。")
     if _db_down:
@@ -1474,6 +1521,7 @@ def show_chat():
             if reopen_session(sid):
                 st.session_state["_just_reopened"] = True  # 進到開啟狀態後給一次提示
                 st.rerun()
+        _render_donate()   # 結案／歷史回顧頁的抖內罐
         return
 
     if messages and messages[-1]["role"] == "consultant":
