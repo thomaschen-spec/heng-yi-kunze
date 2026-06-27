@@ -527,6 +527,19 @@ def add_message(sid: str, role: str, content: str) -> bool:
         st.error("訊息儲存失敗，請稍後再試。")
         return False
 
+def save_rating(sid: str, stars: int) -> bool:
+    """顧客對這次解卦的滿意度評分（1~5 星），寫進 sessions.rating。
+    ⚠ 刻意是顧客可呼叫（非 admin-gated）：只改自己這筆 sid 的 rating 欄、無其他副作用，
+    sid 經 _eqv 清洗。rating 欄未 migrate 時會失敗→回 False，由呼叫端溫和提示。"""
+    if not isinstance(stars, int) or not (1 <= stars <= 5):
+        return False
+    try:
+        _patch("sessions", {"rating": stars}, {"session_id": _eqv(sid)})
+        return True
+    except Exception as e:
+        print(f"[save_rating] {e}")
+        return False
+
 def get_messages(sid: str):
     try:
         return _get("messages", {"session_id": _eqv(sid), "order": "created_at.asc"})
@@ -678,6 +691,30 @@ padding:14px 16px;margin:6px 0;">
     for c, (label, url) in zip(cols, btns):
         c.link_button(label, url, use_container_width=True)
 
+
+def _render_rating(sid: str, sess: dict):
+    """顧客對這次解卦評分（1~5 星）。只在小老師已回覆過時呼叫。
+    帶出已存評分當預設、點星即存；rating 欄未 migrate 時存會失敗，溫和略過。"""
+    cur = sess.get("rating")
+    cur = cur if isinstance(cur, int) and 1 <= cur <= 5 else None
+    _key = f"rate_{sid}"
+    if _key not in st.session_state:
+        st.session_state[_key] = (cur - 1) if cur else None   # st.feedback 用 0-based index
+    st.markdown("---")
+    if st.session_state.pop("_rated_ok", False):
+        st.success("感謝您的評分 🙏")
+    if cur:
+        st.caption(f"您給這次解卦的滿意度：{'⭐' * cur}　（可重新點星星修改）")
+    else:
+        st.caption("這次的解卦您滿意嗎？點星星給小老師一個鼓勵 🙏")
+    picked = st.feedback("stars", key=_key)
+    if picked is not None and (picked + 1) != (cur or 0):
+        if save_rating(sid, picked + 1):
+            st.session_state["_rated_ok"] = True
+            st.rerun()
+        else:
+            st.caption("（評分功能尚未啟用，請稍後再試）")
+
 # ── Email 驗證碼防濫發（跨 session，存 settings 表）──────────────────────────────
 # session 冷卻只擋同一分頁重複點；攻擊者換分頁就能對受害者信箱連續寄信轟炸。
 # 這裡用伺服器端「同信箱冷卻 + 每日上限」補上。DB 異常時 fail-open（不擋正常使用者）。
@@ -722,16 +759,26 @@ def get_stats():
     try:
         rows = _enrich(_get("sessions", {"select": "*,messages(*)", "is_closed": "eq.false"}))
         today = datetime.now(_TAIWAN).strftime("%Y-%m-%d")
+        # 平均滿意度（含已結案）。rating 欄未 migrate 時這段獨立 fail→不影響其他統計。
+        try:
+            _rated = _get("sessions", {"select": "rating"})
+            _rv = [r["rating"] for r in _rated
+                   if isinstance(r.get("rating"), int) and 1 <= r["rating"] <= 5]
+        except Exception:
+            _rv = []
         return {
             "total":   len(rows),
             "today":   sum(1 for s in rows if fmt_time(s.get("created_at", "")).startswith(today)),
             "pending": sum(1 for s in rows if s["last_role"] == "customer" or s["msg_count"] == 0),
             "replied": sum(1 for s in rows if s["last_role"] == "consultant"),
+            "rating_avg":   round(sum(_rv) / len(_rv), 1) if _rv else None,
+            "rating_count": len(_rv),
         }
     except Exception as e:
         print(f"[get_stats] {e}")
         st.warning("⚠️ 資料庫連線異常，請稍後重試。")
-        return {"total": 0, "today": 0, "pending": 0, "replied": 0}
+        return {"total": 0, "today": 0, "pending": 0, "replied": 0,
+                "rating_avg": None, "rating_count": 0}
 
 @st.cache_data(ttl=300)
 def _check_line_token(token: str):
@@ -1514,6 +1561,8 @@ def show_chat():
                 st.markdown(f"**【小老師解卦】**\n\n{msg['content']}")  # 小老師回覆保留 markdown
                 st.caption(fmt_time(msg["created_at"]))
 
+    _has_reply = any(m.get("role") == "consultant" for m in messages)
+
     if sess["is_closed"]:
         st.info("✅ 此諮詢已由小老師結案。")
         st.caption("還想針對這個問題追問嗎？可以重新開啟，小老師會再收到通知；不需要的話也可回首頁問全新的問題。")
@@ -1521,6 +1570,8 @@ def show_chat():
             if reopen_session(sid):
                 st.session_state["_just_reopened"] = True  # 進到開啟狀態後給一次提示
                 st.rerun()
+        if _has_reply:
+            _render_rating(sid, sess)   # 結案／歷史頁仍可評分
         _render_donate()   # 結案／歷史回顧頁的抖內罐
         return
 
@@ -1539,6 +1590,9 @@ def show_chat():
                 st.rerun()
             else:
                 st.error("結案失敗，請稍後再試。")
+
+    if _has_reply:
+        _render_rating(sid, sess)   # 小老師回覆過即可評分（進行中也能評）
 
     if messages and messages[-1]["role"] == "customer":
         st.info("⏳ 小老師正在為您研讀卦象，請稍候⋯⋯")
@@ -1578,6 +1632,9 @@ def show_admin():
 <div class="stat-num">{icon} {val}</div>
 <div class="stat-label">{label}</div>
 </div>""", unsafe_allow_html=True)
+
+    if stats.get("rating_count"):
+        st.caption(f"⭐ 平均滿意度 {stats['rating_avg']} / 5　（{stats['rating_count']} 則評分）")
 
     # 診斷面板：僅後台 + 網址加 ?debug=1 才顯示（含 DB 寫刪探針，不可外露給顧客）。
     if st.query_params.get("debug") == "1":
@@ -1666,6 +1723,8 @@ def show_admin():
         preview_esc = _html.escape(preview)
         cat_esc = _html.escape(s["category"] or "")
         sid_esc = _html.escape(s["session_id"] or "")
+        _rt = s.get("rating")
+        rating_html = f" · ⭐{_rt}" if isinstance(_rt, int) and 1 <= _rt <= 5 else ""
 
         ci, cb = st.columns([4, 1])
         with ci:
@@ -1676,7 +1735,7 @@ def show_admin():
   {status_html}
 </div>
 <div class="sess-meta">
-  編號：{sid_esc} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}
+  編號：{sid_esc} · {s['msg_count']} 則 · {fmt_time(s['updated_at'])}{rating_html}
 </div>
 <div class="sess-preview">💬 {preview_esc}</div>
 </div>""", unsafe_allow_html=True)
@@ -1749,6 +1808,10 @@ window.parent.sessionStorage.removeItem('iching_draft_{_draft_clear_sid}');
 <div class="chat-hdr-sub" style="margin-top:4px;">📧 Email：{email_display}</div>
 </span>
 </div>""", unsafe_allow_html=True)
+
+    _rt = sess.get("rating")
+    if isinstance(_rt, int) and 1 <= _rt <= 5:
+        st.markdown(f"**顧客滿意度：** {'⭐' * _rt}（{_rt}/5）")
 
     st.markdown('<hr class="g-div">', unsafe_allow_html=True)
 
