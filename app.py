@@ -1081,7 +1081,7 @@ input, textarea, button, select {{ font-size: 1rem !important; }}
         st.markdown("---")
         st.markdown("""<div style="background:#2D3B2A;border:1px solid #5A7050;border-radius:8px;
 padding:7px 10px;text-align:center;color:#A0C870;font-size:0.82rem;font-weight:700;
-letter-spacing:0.05em;margin-bottom:10px;">🎁 目前為免費版</div>""", unsafe_allow_html=True)
+letter-spacing:0.05em;margin-bottom:10px;">🔧 斗內功能製作中</div>""", unsafe_allow_html=True)
         st.markdown("""<small>
 <b>使用說明</b><br>
 ① 用 Google 或 Email 登入<br>
