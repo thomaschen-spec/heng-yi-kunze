@@ -50,8 +50,8 @@ def _in_app_browser() -> bool:
         ua = st.context.headers.get("User-Agent", "") or ""
     except Exception:
         return False
-    markers = ("Line/", "FBAN", "FBAV", "FB_IAB", "Instagram",
-               "Messenger", "MicroMessenger", "; wv)")
+    markers = ("Line/", "FBAN", "FBAV", "FB_IAB", "Instagram", "Threads/",
+               "ThreadsWebView", "Messenger", "MicroMessenger", "; wv)")
     return any(m in ua for m in markers)
 
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
@@ -1242,7 +1242,7 @@ localStorage.removeItem('iching_email');
         if not getattr(st.user, "is_logged_in", False) and _in_app_browser():
             # LINE/IG 等 App 內嵌瀏覽器會被 Google 以 403 disallowed_useragent 擋下，
             # 先提示顧客改用真瀏覽器或下方 Email 登入，免得撞牆。
-            st.warning("⚠️ 偵測到您在 LINE／IG 等 App 內開啟，**Google 登入會被 Google 擋下（403）**。"
+            st.warning("⚠️ 偵測到您在 LINE／IG／Threads 等 App 內開啟，**Google 登入會被 Google 擋下（403）**。"
                        "請點右上角「⋯」選「用瀏覽器開啟」，或直接改用下方的 📧 Email 登入。")
         if getattr(st.user, "is_logged_in", False):
             gem = (getattr(st.user, "email", "") or "").strip().lower()
