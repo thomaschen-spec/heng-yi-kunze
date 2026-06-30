@@ -1239,11 +1239,6 @@ localStorage.removeItem('iching_email');
 </div>""", unsafe_allow_html=True)
 
     if _google_enabled():
-        if not getattr(st.user, "is_logged_in", False) and _in_app_browser():
-            # LINE/IG 等 App 內嵌瀏覽器會被 Google 以 403 disallowed_useragent 擋下，
-            # 先提示顧客改用真瀏覽器或下方 Email 登入，免得撞牆。
-            st.warning("⚠️ 偵測到您在 LINE／IG／Threads 等 App 內開啟，**Google 登入會被 Google 擋下（403）**。"
-                       "請點右上角「⋯」選「用瀏覽器開啟」，或直接改用下方的 📧 Email 登入。")
         if getattr(st.user, "is_logged_in", False):
             gem = (getattr(st.user, "email", "") or "").strip().lower()
             if gem and _valid_email(gem):
@@ -1252,16 +1247,22 @@ localStorage.removeItem('iching_email');
                 if gname:
                     st.session_state["name_prefill"] = gname
                 # 只設定身分、不強制跳轉；若有進行中問卦，由下方「進行中諮詢」橫幅讓顧客自己選擇回去
-                # （取代舊的「自動跳進對話」——顧客會被困在對話、到不了首頁、也不能問新問題）。
                 st.success(f"✅ 已用 Google 登入（{gem}）")
                 st.button("登出 Google", on_click=st.logout, key="g_logout")
             else:
                 st.warning("Google 登入未取得 Email，請改用下方 Email 登入。")
                 st.button("登出 Google", on_click=st.logout, key="g_logout_noemail")
+        elif _in_app_browser():
+            # App 內嵌 WebView（LINE／IG／Threads 等）→ Google 必定 403，直接隱藏按鈕、只留提示
+            st.info("📱 偵測到您在 App 內開啟。\n\n"
+                    "**Google 登入在 LINE／Threads／IG 內無法使用**（Google 政策限制）。\n\n"
+                    "請點右上角「⋯」→「用瀏覽器開啟」，或直接用下方 📧 **Email 登入**即可。")
         else:
             st.button("🔵 用 Google 帳號登入 / 註冊（最快，免記密碼）",
                       use_container_width=True, on_click=st.login, key="g_login")
             st.caption("用 Google 一鍵登入，免設密碼；登入後小老師回覆會寄信通知您，日後回來自動登入。")
+            # 萬一 Google 登入失敗（部分 App 內嵌瀏覽器未被偵測到），提示使用 Email 備案
+            st.caption("⚠️ 若 Google 登入出現錯誤，請改用下方 📧 Email 登入。")
 
     if _email_enabled():
         with st.expander("📧 用 Email 登入 / 查詢（免記密碼，推薦）", expanded=False):
